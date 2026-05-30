@@ -28,6 +28,7 @@ var _hud: HUD
 
 func _ready() -> void:
 	_register_input()
+	_capture_mouse()
 	_ensure_environment()
 	_spawn_ship_and_camera()
 	_spawn_world()
@@ -35,8 +36,29 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed(&"restart"):
+	if event.is_action_pressed(&"quit"):
+		get_tree().quit()
+	elif event.is_action_pressed(&"toggle_fullscreen"):
+		_toggle_fullscreen()
+	elif event.is_action_pressed(&"restart"):
 		get_tree().reload_current_scene()
+
+
+## Hide + lock the cursor so mouse motion drives the free-look camera (skipped under --headless).
+func _capture_mouse() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## Flip between fullscreen and windowed (the `toggle_fullscreen` / F action). Works regardless
+## of the boot mode set in settings/settings.cfg.
+func _toggle_fullscreen() -> void:
+	var win := get_window()
+	if win == null:
+		return
+	var is_fs := win.mode == Window.MODE_FULLSCREEN or win.mode == Window.MODE_EXCLUSIVE_FULLSCREEN
+	win.mode = Window.MODE_WINDOWED if is_fs else Window.MODE_FULLSCREEN
 
 
 func _spawn_ship_and_camera() -> void:
@@ -173,6 +195,8 @@ func _register_input() -> void:
 	_add_action(&"steer_down",  [KEY_S, KEY_DOWN])
 	_add_action(&"boost",       [KEY_SHIFT, KEY_SPACE])
 	_add_action(&"restart",     [KEY_R])
+	_add_action(&"toggle_fullscreen", [KEY_F])
+	_add_action(&"quit",        [KEY_ESCAPE])
 
 
 func _add_action(action: StringName, keys: Array) -> void:

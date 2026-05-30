@@ -20,10 +20,19 @@ extends Node3D
 @export var shake_decay: float = 5.0
 @export var shake_strength: float = 0.6
 
+@export_group("Free-look (mouse)")
+@export var mouse_look_enabled: bool = true       ## drift the view with the mouse; springs back to centre
+@export var mouse_sensitivity: float = 0.0028     ## view offset (radians) per pixel of mouse motion
+@export var look_yaw_limit_deg: float = 90.0      ## max left / right view swing from centre
+@export var look_pitch_limit_deg: float = 60.0    ## max up / down view swing from centre
+@export var look_return_sharpness: float = 5.0    ## how fast the view eases back to forward when the mouse is idle
+
 var _target: Node3D
 var _cam: Camera3D
 var _shake: float = 0.0
 var _snapped: bool = false
+var _look_yaw: float = 0.0      ## current mouse-look yaw offset (radians); eases toward 0
+var _look_pitch: float = 0.0    ## current mouse-look pitch offset (radians); eases toward 0
 
 
 func _ready() -> void:
@@ -44,6 +53,20 @@ func add_shake(amount: float) -> void:
 	_shake = minf(_shake + amount, 1.0)
 
 
+## Accumulate mouse motion into the view offset. Handled in _input (not _unhandled_input) so a
+## full-screen Control can never swallow it; the captured cursor (set in game.gd) is what
+## produces the relative-motion events. Sign is non-inverted: mouse right looks right, up looks up.
+func _input(event: InputEvent) -> void:
+	if not mouse_look_enabled:
+		return
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		var motion := (event as InputEventMouseMotion).relative
+		var yaw_limit := deg_to_rad(look_yaw_limit_deg)
+		var pitch_limit := deg_to_rad(look_pitch_limit_deg)
+		_look_yaw = clampf(_look_yaw - motion.x * mouse_sensitivity, -yaw_limit, yaw_limit)
+		_look_pitch = clampf(_look_pitch - motion.y * mouse_sensitivity, -pitch_limit, pitch_limit)
+
+
 func _process(delta: float) -> void:
 	if _target == null:
 		return
@@ -58,6 +81,15 @@ func _process(delta: float) -> void:
 
 	# Look a little ahead of the ship (it always travels −Z) for a forward-leaning feel.
 	look_at(_target.global_position + Vector3(0.0, 0.0, -look_ahead), Vector3.UP)
+
+	# Free-look: offset the view by the accumulated mouse motion, then ease it back toward
+	# forward so the player always drifts back to looking where they fly (driving-game feel).
+	if mouse_look_enabled:
+		var return_k := 1.0 - exp(-look_return_sharpness * delta)
+		_look_yaw = lerpf(_look_yaw, 0.0, return_k)
+		_look_pitch = lerpf(_look_pitch, 0.0, return_k)
+		rotate_object_local(Vector3.UP, _look_yaw)
+		rotate_object_local(Vector3.RIGHT, _look_pitch)
 
 	# Speed → FOV.
 	var ratio: float = 0.0
