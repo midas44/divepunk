@@ -226,12 +226,12 @@ Ordered **by risk**: prove the fun before building content, prove it's a game be
 - [x] **Goal:** an endless city to fly through, no hitches.
 
 ### M3 — Game loop
-- [ ] Obstacles + Jolt collision → game-over state.
-- [ ] Near-miss `Area3D` → points + boost + combo.
-- [ ] `ScoreManager` (distance + near-miss × multiplier, decay on hit); local high score.
-- [ ] `HUD` (score, multiplier, boost) + `GameOver` with **instant restart**.
-- [ ] **First Android export + on-device perf check.**
-- [ ] **Goal:** it's a real game with a score, a fail state, and the "one more go" loop.
+- [x] Obstacles + Jolt collision → game-over state.
+- [x] Near-miss detection → points + boost + combo. *(Implemented via per-frame `direct_space_state` shape queries, not an `Area3D`: under Godot 4.6 + Jolt, an `Area3D` child of a `move_and_slide()`-driven `CharacterBody3D` did not report overlaps; the shape query is deterministic and matches the spec's "detect, don't push" intent.)*
+- [x] `ScoreManager` (distance + near-miss × multiplier, decay on hit); local high score.
+- [x] `HUD` (score, multiplier, boost) + `GameOver` with **instant restart**.
+- [ ] ~~First Android export + on-device perf check.~~ **Postponed to a mature dev stage (per project decision, 2026-05-30).**
+- [x] **Goal:** it's a real game with a score, a fail state, and the "one more go" loop. *(Desktop; headless-verified, pending playtest.)*
 
 ### M4 — Aesthetic pass
 - [ ] `WorldEnvironment`: glow, volumetric fog, dark sky; SSR on desktop.
