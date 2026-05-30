@@ -1,0 +1,3 @@
+# Machine-local Claude Code artifacts — not shared across clones.
+scheduled_tasks.lock
+settings.local.json
