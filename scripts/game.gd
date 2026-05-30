@@ -14,6 +14,7 @@ const CameraRigScript := preload("res://scripts/camera_rig.gd")
 const ChunkManagerScene := preload("res://scenes/world/ChunkManager.tscn")
 const GameOverScene := preload("res://scenes/ui/GameOver.tscn")
 const HUDScene := preload("res://scenes/ui/HUD.tscn")
+const TrafficManagerScript := preload("res://scripts/traffic.gd")  # preloaded (not referenced by class_name) so game.gd parses before the global class cache knows TrafficManager
 
 @export_group("Juice")
 @export var shake_on_near_miss: float = 0.25
@@ -22,7 +23,7 @@ const HUDScene := preload("res://scenes/ui/HUD.tscn")
 var _ship: CharacterBody3D
 var _rig: Node3D
 var _mgr: ChunkManager
-var _traffic: TrafficManager
+var _traffic: Node3D
 var _game_over: GameOverScreen
 var _hud: HUD
 
@@ -111,14 +112,14 @@ func _spawn_world() -> void:
 func _spawn_traffic() -> void:
 	if get_node_or_null(^"Traffic") != null:
 		return
-	_traffic = TrafficManager.new()
+	_traffic = TrafficManagerScript.new()
 	_traffic.name = "Traffic"
 	_apply_traffic_config(_traffic)   # config exports BEFORE add_child so _ready() builds the pool with them
 	add_child(_traffic)
 	_traffic.set_target(_ship)
 
 
-func _apply_traffic_config(t: TrafficManager) -> void:
+func _apply_traffic_config(t: Node3D) -> void:
 	t.car_count = int(_cfg_value("traffic", "count", t.car_count))
 	t.min_speed = float(_cfg_value("traffic", "min_speed", t.min_speed))
 	t.max_speed = float(_cfg_value("traffic", "max_speed", t.max_speed))
