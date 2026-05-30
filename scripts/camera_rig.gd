@@ -19,6 +19,13 @@ extends Node3D
 @export_group("Follow")
 @export var offset: Vector3 = Vector3(0.0, 4.0, 12.0)  ## boom: behind (+Z) and above the car; its length is the orbit radius
 
+@export_group("Distance levels")
+@export var distance_close: float = 0.7      ## boom multiplier — closest level
+@export var distance_normal: float = 1.3     ## boom multiplier — default (1.0 = the old fixed distance, midway between close & normal)
+@export var distance_far: float = 2.2        ## boom multiplier — farthest level
+@export var distance_default_index: int = 1  ## level a run starts on: 0=close, 1=normal, 2=far
+@export var distance_zoom_sharpness: float = 8.0  ## how fast the boom eases between levels when you press Q
+
 @export_group("FOV")
 @export var base_fov: float = 70.0
 @export var max_fov: float = 96.0                       ## widens with speed = sense of velocity
@@ -38,6 +45,9 @@ var _cam: Camera3D
 var _shake: float = 0.0
 var _look_yaw: float = 0.0      ## held orbit yaw (radians), full 360°; persists until you move the mouse
 var _look_pitch: float = 0.0    ## held orbit pitch (radians), clamped to ±limit; persists until you move the mouse
+var _distances: Array[float] = []
+var _distance_index: int = 1    ## index into _distances, cycled by the cycle_camera (Q) action
+var _distance_mult: float = 1.0 ## smoothed current boom multiplier, eased toward _distances[_distance_index]
 
 
 func _ready() -> void:
@@ -47,10 +57,21 @@ func _ready() -> void:
 		_cam.name = "Camera"
 		add_child(_cam)
 	_cam.fov = base_fov
+	_distances = [distance_close, distance_normal, distance_far]
+	_distance_index = clampi(distance_default_index, 0, _distances.size() - 1)
+	_distance_mult = _distances[_distance_index]   # start at the chosen level (no opening zoom)
 
 
 func set_target(t: Node3D) -> void:
 	_target = t
+
+
+## Advance to the next camera distance level (close → normal → far → close); bound to the
+## cycle_camera action (Q). The boom length eases toward the new level in _process.
+func _cycle_distance() -> void:
+	if _distances.is_empty():
+		return
+	_distance_index = (_distance_index + 1) % _distances.size()
 
 
 ## Call on impacts / boosts for a punch of screen shake. amount ~0.3–1.0.
@@ -62,6 +83,11 @@ func add_shake(amount: float) -> void:
 ## _unhandled_input) so a full-screen Control can never swallow it; the captured cursor (set in
 ## game.gd) produces the relative-motion events. Non-inverted: right orbits right, up orbits up.
 func _input(event: InputEvent) -> void:
+	# Cycle the camera distance (Q) — handled before the mouse-look guard so it works even with
+	# free-look disabled.
+	if event.is_action_pressed(&"cycle_camera"):
+		_cycle_distance()
+		return
 	if not mouse_look_enabled:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -85,8 +111,12 @@ func _process(delta: float) -> void:
 	var spin := Basis.IDENTITY
 	if mouse_look_enabled:
 		spin = Basis.from_euler(Vector3(_look_pitch, _look_yaw, 0.0))
-	var rest := Basis.looking_at(-offset, Vector3.UP)   # aim the camera's −Z at the car from the rest pose
-	global_transform = Transform3D(spin * rest, pivot + spin * offset)
+	# Ease the boom length toward the selected distance level (close / normal / far via Q).
+	var target_mult: float = _distances[_distance_index] if not _distances.is_empty() else 1.0
+	_distance_mult = lerpf(_distance_mult, target_mult, 1.0 - exp(-distance_zoom_sharpness * delta))
+	var eff_offset := offset * _distance_mult
+	var rest := Basis.looking_at(-eff_offset, Vector3.UP)   # aim the camera's −Z at the car from the rest pose
+	global_transform = Transform3D(spin * rest, pivot + spin * eff_offset)
 
 	# Speed → FOV.
 	var ratio: float = 0.0

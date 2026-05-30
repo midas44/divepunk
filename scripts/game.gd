@@ -76,6 +76,7 @@ func _spawn_ship_and_camera() -> void:
 		_rig = Node3D.new()
 		_rig.name = "CameraRig"
 		_rig.set_script(CameraRigScript)
+		_apply_camera_config(_rig)   # apply config exports BEFORE add_child so _ready() builds levels with them
 		add_child(_rig)
 
 	if _rig.has_method(&"set_target"):
@@ -170,6 +171,16 @@ func _apply_ship_config(ship: CharacterBody3D) -> void:
 	ship.bound_y_max = float(_cfg_value("corridor", "ceiling", ship.bound_y_max))
 
 
+## Pushes the config-driven camera tunables onto the rig before it enters the tree, so _ready()
+## builds its distance levels from them. Lives in settings.cfg [camera]; each falls back to the
+## rig's own @export default when the key is absent.
+func _apply_camera_config(rig: Node3D) -> void:
+	rig.distance_close = float(_cfg_value("camera", "distance_close", rig.distance_close))
+	rig.distance_normal = float(_cfg_value("camera", "distance_normal", rig.distance_normal))
+	rig.distance_far = float(_cfg_value("camera", "distance_far", rig.distance_far))
+	rig.distance_default_index = int(_cfg_value("camera", "default_level", rig.distance_default_index))
+
+
 func _ensure_environment() -> void:
 	if get_node_or_null(^"Sun") == null:
 		var sun := DirectionalLight3D.new()
@@ -216,6 +227,7 @@ func _register_input() -> void:
 	_add_action(&"steer_up",    [KEY_W, KEY_UP])
 	_add_action(&"steer_down",  [KEY_S, KEY_DOWN])
 	_add_action(&"boost",       [KEY_SHIFT, KEY_SPACE])
+	_add_action(&"cycle_camera",[KEY_Q])
 	_add_action(&"restart",     [KEY_R])
 	_add_action(&"toggle_fullscreen", [KEY_F])
 	_add_action(&"quit",        [KEY_ESCAPE])
