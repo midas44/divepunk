@@ -1,24 +1,28 @@
 extends Node3D
-## Root bootstrap — DIVEPUNK, milestones M0–M1.
+## Root bootstrap — DIVEPUNK, milestones M0–M2.
 ##
 ## Attach to the root Node3D of Main.tscn and press Play. It self-assembles a runnable
-## scene (ship + chase camera + minimal night environment), registers the input actions
-## in code (so the project runs with zero manual setup), and handles restart.
+## scene (ship + chase camera + minimal night environment + streaming city), registers
+## the input actions in code (so the project runs with zero manual setup), and handles
+## restart.
 ##
-## As you build real, hand-authored scenes from M2 onward you can delete the auto-spawn
-## helpers below and place a Ship / CameraRig directly in the scene tree instead.
+## As you build real, hand-authored scenes you can delete the auto-spawn helpers below
+## and place the nodes directly in the scene tree instead.
 
 const ShipScript := preload("res://scripts/ship.gd")
 const CameraRigScript := preload("res://scripts/camera_rig.gd")
+const ChunkManagerScene := preload("res://scenes/world/ChunkManager.tscn")
 
 var _ship: CharacterBody3D
 var _rig: Node3D
+var _mgr: ChunkManager
 
 
 func _ready() -> void:
 	_register_input()
 	_ensure_environment()
 	_spawn_ship_and_camera()
+	_spawn_world()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -53,6 +57,27 @@ func _on_ship_crashed() -> void:
 	get_tree().reload_current_scene()
 
 
+## Spawns the M2 streaming city around the ship. World seed + debug flags come from the
+## Config autoload (edit config/settings.cfg to change them).
+func _spawn_world() -> void:
+	if get_node_or_null(^"ChunkManager") != null:
+		return
+	_mgr = ChunkManagerScene.instantiate() as ChunkManager
+	_mgr.name = "ChunkManager"
+	_mgr.world_seed = int(_cfg_value("game", "seed", 0))
+	_mgr.log_streaming = bool(_cfg_value("debug", "log_streaming", false))
+	add_child(_mgr)
+	_mgr.set_target(_ship)
+
+
+## Safe read from the Config autoload (falls back to the default if it isn't present).
+func _cfg_value(section: String, key: String, default: Variant) -> Variant:
+	var cfg := get_node_or_null(^"/root/Config")
+	if cfg != null and cfg.has_method(&"get_value"):
+		return cfg.get_value(section, key, default)
+	return default
+
+
 func _ensure_environment() -> void:
 	if get_node_or_null(^"Sun") == null:
 		var sun := DirectionalLight3D.new()
@@ -78,7 +103,7 @@ func _ensure_environment() -> void:
 		add_child(we)
 
 	if get_node_or_null(^"RefGround") == null:
-		# A long dark ground plane so motion reads clearly in the empty M1 "void".
+		# A long dark ground plane so motion reads clearly against the city.
 		var ground := MeshInstance3D.new()
 		ground.name = "RefGround"
 		var plane := PlaneMesh.new()
