@@ -1,11 +1,17 @@
 extends CharacterBody3D
-## Arcade flight controller — DIVEPUNK, milestones M0–M1.
+## Arcade flight controller — DIVEPUNK, milestones M0–M3.
 ##
 ## Attach to a CharacterBody3D (game.gd will create one automatically if you just
 ## press Play). Constant forward motion that ramps up over a run; the player steers
 ## laterally and vertically within a corridor; hold `boost` for risky extra speed.
 ## Every number is exported so you can dial in the "feel" live in the Inspector —
-## this script IS Milestone M1, so expect to spend real time tuning these.
+## the speed/steering values ARE Milestone M1, so expect to spend real time tuning them.
+##
+## Crash detection (M3) uses a direct physics-space shape query each frame, NOT an Area3D:
+## under Godot 4.6 + Jolt, Area overlap callbacks proved unreliable here, while
+## direct_space_state.intersect_shape detects obstacles deterministically. This matches the
+## spec's intent — use the physics engine to DETECT contact (spec §7.4), never to push the
+## ship around. The near-miss query (a slightly larger box, spec §7.5) lands in M3b.
 
 @export_group("Speed")
 @export var base_speed: float = 60.0        ## forward speed at the start of a run (m/s)
@@ -27,9 +33,15 @@ extends CharacterBody3D
 @export var bound_y_min: float = 4.0
 @export var bound_y_max: float = 90.0
 
+@export_group("Collision")
+@export var crash_size: Vector3 = Vector3(3.0, 1.0, 5.0)   ## crash hitbox (matches the ship body)
+
+## 1-indexed physics layer obstacles live on (matches city_chunk.gd / project.godot).
+const OBSTACLE_LAYER := 2
+
 ## Emitted every physics frame. ratio is 0 at the run's start speed, 1 at full boost.
 signal speed_changed(speed: float, ratio: float, boosting: bool)
-## Emitted once when the ship crashes (wired up in M3).
+## Emitted once when the ship crashes.
 signal crashed
 
 var _speed_floor: float = 0.0
@@ -38,12 +50,15 @@ var _boost_blend: float = 0.0
 var _steer: Vector2 = Vector2.ZERO
 var _model: Node3D
 var _alive: bool = true
+var _crash_shape: BoxShape3D
+var _crash_query: PhysicsShapeQueryParameters3D
 
 
 func _ready() -> void:
 	_speed_floor = base_speed
 	_forward_speed = base_speed
 	_ensure_visual_and_collision()
+	_build_crash_query()
 
 
 func _physics_process(delta: float) -> void:
@@ -69,6 +84,7 @@ func _physics_process(delta: float) -> void:
 
 	_clamp_to_corridor()
 	_bank_model(delta)
+	_check_crash()
 	speed_changed.emit(_forward_speed, get_speed_ratio(), boosting)
 
 
@@ -90,6 +106,30 @@ func crash() -> void:
 	crashed.emit()
 
 
+## Shape-query the obstacles layer at the ship's position. Any hit = a crash. Runs in
+## _physics_process so direct_space_state is valid; masks to OBSTACLE_LAYER so it never
+## hits the ship's own body.
+func _check_crash() -> void:
+	if not _alive or _crash_query == null:
+		return
+	var space := get_world_3d().direct_space_state
+	if space == null:
+		return
+	_crash_query.transform = Transform3D(Basis(), global_position)
+	if not space.intersect_shape(_crash_query, 1).is_empty():
+		crash()
+
+
+func _build_crash_query() -> void:
+	_crash_shape = BoxShape3D.new()
+	_crash_shape.size = crash_size
+	_crash_query = PhysicsShapeQueryParameters3D.new()
+	_crash_query.shape = _crash_shape
+	_crash_query.collision_mask = 1 << (OBSTACLE_LAYER - 1)   # only the obstacles layer
+	_crash_query.collide_with_bodies = true
+	_crash_query.collide_with_areas = false
+
+
 func _clamp_to_corridor() -> void:
 	var p := global_position
 	p.x = clampf(p.x, -bound_x, bound_x)
@@ -109,7 +149,7 @@ func _bank_model(delta: float) -> void:
 	_model.rotation = _model.rotation.lerp(target_rot, 1.0 - exp(-visual_lerp * delta))
 
 
-## Builds a placeholder neon box + collision so you can press Play in M0 with zero art.
+## Builds a placeholder neon box + collision so you can press Play with zero art.
 ## Replace the "Model" child with a real ship mesh later — the controller doesn't care.
 func _ensure_visual_and_collision() -> void:
 	_model = get_node_or_null(^"Model") as Node3D

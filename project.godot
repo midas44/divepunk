@@ -23,6 +23,11 @@ Config="*res://autoload/config.gd"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 
+[layer_names]
+
+3d_physics/layer_1="ship"
+3d_physics/layer_2="obstacles"
+
 [rendering]
 
 renderer/rendering_method="forward_plus"

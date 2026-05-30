@@ -1,10 +1,10 @@
 extends Node3D
-## Root bootstrap — DIVEPUNK, milestones M0–M2.
+## Root bootstrap — DIVEPUNK, milestones M0–M3.
 ##
 ## Attach to the root Node3D of Main.tscn and press Play. It self-assembles a runnable
-## scene (ship + chase camera + minimal night environment + streaming city), registers
+## scene (ship + chase camera + minimal night environment + streaming city + UI), registers
 ## the input actions in code (so the project runs with zero manual setup), and handles
-## restart.
+## restart and the crash -> game-over flow.
 ##
 ## As you build real, hand-authored scenes you can delete the auto-spawn helpers below
 ## and place the nodes directly in the scene tree instead.
@@ -12,10 +12,12 @@ extends Node3D
 const ShipScript := preload("res://scripts/ship.gd")
 const CameraRigScript := preload("res://scripts/camera_rig.gd")
 const ChunkManagerScene := preload("res://scenes/world/ChunkManager.tscn")
+const GameOverScene := preload("res://scenes/ui/GameOver.tscn")
 
 var _ship: CharacterBody3D
 var _rig: Node3D
 var _mgr: ChunkManager
+var _game_over: GameOverScreen
 
 
 func _ready() -> void:
@@ -23,6 +25,7 @@ func _ready() -> void:
 	_ensure_environment()
 	_spawn_ship_and_camera()
 	_spawn_world()
+	_spawn_ui()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -52,11 +55,6 @@ func _spawn_ship_and_camera() -> void:
 		_ship.crashed.connect(_on_ship_crashed)
 
 
-func _on_ship_crashed() -> void:
-	# M3 replaces this with a proper game-over screen; for now, just restart.
-	get_tree().reload_current_scene()
-
-
 ## Spawns the M2 streaming city around the ship. World seed + debug flags come from the
 ## Config autoload (edit config/settings.cfg to change them).
 func _spawn_world() -> void:
@@ -68,6 +66,21 @@ func _spawn_world() -> void:
 	_mgr.log_streaming = bool(_cfg_value("debug", "log_streaming", false))
 	add_child(_mgr)
 	_mgr.set_target(_ship)
+
+
+## Spawns the UI overlays. M3a: the Game Over screen (HUD arrives in M3b).
+func _spawn_ui() -> void:
+	if get_node_or_null(^"GameOver") != null:
+		return
+	_game_over = GameOverScene.instantiate() as GameOverScreen
+	_game_over.name = "GameOver"
+	add_child(_game_over)
+
+
+func _on_ship_crashed() -> void:
+	print("[DIVEPUNK] crashed — game over")
+	if _game_over != null:
+		_game_over.show_over()
 
 
 ## Safe read from the Config autoload (falls back to the default if it isn't present).
