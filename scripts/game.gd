@@ -22,6 +22,7 @@ const HUDScene := preload("res://scenes/ui/HUD.tscn")
 var _ship: CharacterBody3D
 var _rig: Node3D
 var _mgr: ChunkManager
+var _traffic: TrafficManager
 var _game_over: GameOverScreen
 var _hud: HUD
 
@@ -32,6 +33,7 @@ func _ready() -> void:
 	_ensure_environment()
 	_spawn_ship_and_camera()
 	_spawn_world()
+	_spawn_traffic()
 	_spawn_ui()
 
 
@@ -102,6 +104,29 @@ func _spawn_world() -> void:
 	_mgr.corridor_ceiling = float(_cfg_value("corridor", "ceiling", _mgr.corridor_ceiling))
 	add_child(_mgr)
 	_mgr.set_target(_ship)
+
+
+## Spawns the moving traffic (a live hazard) once the ship exists. Config lives in
+## settings.cfg [traffic]; corridor extents come from [corridor]; the seed from [game].
+func _spawn_traffic() -> void:
+	if get_node_or_null(^"Traffic") != null:
+		return
+	_traffic = TrafficManager.new()
+	_traffic.name = "Traffic"
+	_apply_traffic_config(_traffic)   # config exports BEFORE add_child so _ready() builds the pool with them
+	add_child(_traffic)
+	_traffic.set_target(_ship)
+
+
+func _apply_traffic_config(t: TrafficManager) -> void:
+	t.car_count = int(_cfg_value("traffic", "count", t.car_count))
+	t.min_speed = float(_cfg_value("traffic", "min_speed", t.min_speed))
+	t.max_speed = float(_cfg_value("traffic", "max_speed", t.max_speed))
+	t.toward_fraction = float(_cfg_value("traffic", "toward_fraction", t.toward_fraction))
+	t.corridor_half_width = float(_cfg_value("corridor", "half_width", t.corridor_half_width))
+	t.corridor_floor = float(_cfg_value("corridor", "floor", t.corridor_floor))
+	t.corridor_ceiling = float(_cfg_value("corridor", "ceiling", t.corridor_ceiling))
+	t.world_seed = int(_cfg_value("game", "seed", 0))
 
 
 ## Spawns the UI overlays: the in-run HUD and the Game Over screen. A fresh ScoreManager
