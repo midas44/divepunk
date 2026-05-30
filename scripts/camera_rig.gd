@@ -1,15 +1,16 @@
 extends Node3D
-## Smoothed chase camera with speed-driven FOV and shake — DIVEPUNK, milestone M1.
+## Chase camera that orbits the car on a fixed-radius boom (mouse free-look), with speed-driven
+## FOV and shake — DIVEPUNK, milestone M1.
 ##
-## Put this Node3D in the scene; it will create a Camera3D child named "Camera" if one
-## isn't present. Call set_target(ship) to follow the ship — game.gd does this for you.
-## FOV widening with speed is the single most effective "this feels fast" trick, so the
-## FOV range here is worth tuning alongside the ship's speed values.
+## Put this Node3D in the scene; it creates a Camera3D child named "Camera" if one isn't present.
+## Call set_target(ship) to follow the ship — game.gd does this for you. The mouse flies the camera
+## AROUND the car and always looks straight at it, so the car stays framed from any angle — including
+## directly above or below. FOV widening with speed is the single most effective "this feels fast"
+## trick, so the FOV range here is worth tuning alongside the ship's speed values.
 
 @export_group("Follow")
-@export var offset: Vector3 = Vector3(0.0, 4.0, 12.0)  ## rest position behind (+Z) and above the car; also the orbit radius
-@export var follow_sharpness: float = 6.0              ## lower = floatier, laggier chase
-@export var look_height: float = 1.5                   ## aim this far above the car's origin (frames it slightly low)
+@export var offset: Vector3 = Vector3(0.0, 4.0, 12.0)  ## rest pose: behind (+Z) and above the car; its length is the orbit radius
+@export var follow_sharpness: float = 6.0              ## how quickly the boom's pivot trails the car (lower = floatier)
 
 @export_group("FOV")
 @export var base_fov: float = 70.0
@@ -23,14 +24,15 @@ extends Node3D
 @export_group("Free-look (mouse)")
 @export var mouse_look_enabled: bool = true       ## orbit the camera around the car with the mouse (no auto-return)
 @export var mouse_sensitivity: float = 0.0014     ## orbit (radians) per pixel of mouse motion
-@export var look_pitch_limit_deg: float = 80.0    ## clamp the up / down orbit so the camera never crosses straight over the car; yaw is unlimited (full 360°)
+@export var look_pitch_limit_deg: float = 90.0    ## up / down orbit limit; 90° reaches directly above / below the car. Yaw is unlimited (full 360°)
 
 var _target: Node3D
 var _cam: Camera3D
 var _shake: float = 0.0
 var _snapped: bool = false
+var _smooth_pivot: Vector3 = Vector3.ZERO   ## smoothed point the boom orbits (trails the car)
 var _look_yaw: float = 0.0      ## held orbit yaw (radians), full 360°; persists until you move the mouse
-var _look_pitch: float = 0.0    ## held orbit pitch (radians), clamped; persists until you move the mouse
+var _look_pitch: float = 0.0    ## held orbit pitch (radians), clamped to ±limit; persists until you move the mouse
 
 
 func _ready() -> void:
@@ -59,9 +61,9 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var motion := (event as InputEventMouseMotion).relative
-		# Yaw orbits a full 360° around the car (look back swings the camera to the front); wrap to keep tidy.
+		# Yaw orbits a full 360° (look back swings the camera to the front); wrap to keep it tidy.
 		_look_yaw = wrapf(_look_yaw - motion.x * mouse_sensitivity, -PI, PI)
-		# Pitch orbits above / below, clamped so the camera never crosses straight over the car.
+		# Pitch orbits up / down to the limit (±90° = directly above / below the car).
 		var pitch_limit := deg_to_rad(look_pitch_limit_deg)
 		_look_pitch = clampf(_look_pitch - motion.y * mouse_sensitivity, -pitch_limit, pitch_limit)
 
@@ -70,22 +72,23 @@ func _process(delta: float) -> void:
 	if _target == null:
 		return
 
-	# Orbit the rest offset around the car: looking back swings the camera to the front, pitch
-	# lifts it above / drops it below. The distance to the car stays constant, so it is a true
-	# fly-around — and because we always look at the car (below), it stays framed from any angle.
+	# Smoothly trail the car with the boom's pivot. This is the only lag in the rig; the orbit
+	# itself is rigid, so swinging the view never feels mushy or "starved" by the car's forward speed.
 	var pivot := _target.global_position
-	var orbit := Basis.IDENTITY
-	if mouse_look_enabled:
-		orbit = Basis.from_euler(Vector3(_look_pitch, _look_yaw, 0.0))
-	var desired := pivot + orbit * offset
 	if not _snapped:
-		global_position = desired          # avoid an ugly swoop from the origin on frame 1
+		_smooth_pivot = pivot
 		_snapped = true
 	else:
-		global_position = global_position.lerp(desired, 1.0 - exp(-follow_sharpness * delta))
+		_smooth_pivot = _smooth_pivot.lerp(pivot, 1.0 - exp(-follow_sharpness * delta))
 
-	# Always frame the car (aim a touch above its origin) so it is visible at every orbit angle.
-	look_at(pivot + Vector3(0.0, look_height, 0.0), Vector3.UP)
+	# Rigid orbit: rotate BOTH the boom offset and the camera's orientation by the same spin, so the
+	# camera always looks straight at the car — at any angle, including directly above / below, with
+	# no look_at degeneracy at the poles. rest aims the camera's −Z at the car from the rest pose.
+	var spin := Basis.IDENTITY
+	if mouse_look_enabled:
+		spin = Basis.from_euler(Vector3(_look_pitch, _look_yaw, 0.0))
+	var rest := Basis.looking_at(-offset, Vector3.UP)
+	global_transform = Transform3D(spin * rest, _smooth_pivot + spin * offset)
 
 	# Speed → FOV.
 	var ratio: float = 0.0
