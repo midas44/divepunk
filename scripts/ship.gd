@@ -38,9 +38,11 @@ extends CharacterBody3D
 @export var near_miss_size: Vector3 = Vector3(16.0, 12.0, 14.0)  ## "danger bubble" around the ship (spec §7.5)
 
 @export_group("Boost economy")
-@export var boost_meter_start: float = 0.5   ## meter at run start (0..1)
-@export var boost_drain: float = 0.45        ## meter spent per second while boosting
-@export var boost_gain_per_near_miss: float = 0.18  ## meter refilled per near-miss
+@export var boost_capacity: float = 4.0           ## tank size = seconds of boost at a full meter
+@export var boost_start_fraction: float = 0.5     ## fraction of the tank you start a run with (0..1)
+@export var boost_drain: float = 1.0              ## fuel-seconds spent per second of boosting (1.0 = a full tank lasts boost_capacity s)
+@export var boost_regen: float = 0.6             ## fuel-seconds refilled per second while NOT boosting (the gradual accumulation)
+@export var boost_gain_per_near_miss: float = 0.6  ## bonus fuel-seconds added per near-miss (risk/reward, on top of regen)
 
 ## 1-indexed physics layer obstacles live on (matches city_chunk.gd / project.godot).
 const OBSTACLE_LAYER := 2
@@ -69,7 +71,7 @@ var _near_now: Dictionary = {}   ## instance_id -> true for obstacles currently 
 func _ready() -> void:
 	_speed_floor = base_speed
 	_forward_speed = base_speed
-	_boost_meter = clampf(boost_meter_start, 0.0, 1.0)
+	_boost_meter = clampf(boost_start_fraction, 0.0, 1.0) * boost_capacity
 	_ensure_visual_and_collision()
 	_build_queries()
 
@@ -79,12 +81,15 @@ func _physics_process(delta: float) -> void:
 		return
 
 	# Ramp the speed floor across the run, then ease boost on top of it. Boosting is gated by
-	# the boost meter — hold the action AND have fuel; the meter drains while boosting and is
-	# refilled by near-misses (the risk/reward economy, spec §5.3).
+	# the boost meter — hold the action AND have fuel. The tank (measured in seconds of boost,
+	# boost_capacity) drains while boosting and refills GRADUALLY while you're not; near-misses
+	# add a bonus chunk on top (the risk/reward economy, spec §5.3).
 	_speed_floor = minf(_speed_floor + ramp_per_second * delta, max_speed)
 	var boosting: bool = Input.is_action_pressed(&"boost") and _boost_meter > 0.0
 	if boosting:
 		_boost_meter = maxf(0.0, _boost_meter - boost_drain * delta)
+	else:
+		_boost_meter = minf(boost_capacity, _boost_meter + boost_regen * delta)
 	_boost_blend = move_toward(_boost_blend, 1.0 if boosting else 0.0, boost_blend_rate * delta)
 	_forward_speed = _speed_floor * lerpf(1.0, boost_multiplier, _boost_blend)
 
@@ -109,14 +114,14 @@ func get_speed() -> float:
 	return _forward_speed
 
 
-## 0..1 fuel remaining in the boost meter. Drives the HUD bar.
+## 0..1 fraction of the tank remaining (fuel-seconds / capacity). Drives the HUD bar.
 func get_boost_meter() -> float:
-	return _boost_meter
+	return _boost_meter / maxf(boost_capacity, 0.001)
 
 
-## Refill the boost meter (called on a near-miss). amount is in 0..1 units.
+## Add fuel to the boost tank (called on a near-miss). amount is in fuel-seconds.
 func add_boost(amount: float) -> void:
-	_boost_meter = clampf(_boost_meter + amount, 0.0, 1.0)
+	_boost_meter = clampf(_boost_meter + amount, 0.0, boost_capacity)
 
 
 ## 0 at the run's starting speed, 1 at fully boosted top speed. Drives camera FOV, speed
