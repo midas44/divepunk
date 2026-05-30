@@ -7,9 +7,9 @@ extends Node3D
 ## FOV range here is worth tuning alongside the ship's speed values.
 
 @export_group("Follow")
-@export var offset: Vector3 = Vector3(0.0, 4.0, 12.0)  ## behind (+Z) and above the ship
+@export var offset: Vector3 = Vector3(0.0, 4.0, 12.0)  ## rest position behind (+Z) and above the car; also the orbit radius
 @export var follow_sharpness: float = 6.0              ## lower = floatier, laggier chase
-@export var look_ahead: float = 10.0                   ## look this far ahead of the ship
+@export var look_height: float = 1.5                   ## aim this far above the car's origin (frames it slightly low)
 
 @export_group("FOV")
 @export var base_fov: float = 70.0
@@ -21,16 +21,16 @@ extends Node3D
 @export var shake_strength: float = 0.6
 
 @export_group("Free-look (mouse)")
-@export var mouse_look_enabled: bool = true       ## look around freely with the mouse (no auto-return)
-@export var mouse_sensitivity: float = 0.0014     ## view rotation (radians) per pixel of mouse motion
-@export var look_pitch_limit_deg: float = 90.0    ## clamp up / down so the view never flips; yaw is unlimited (full 360°)
+@export var mouse_look_enabled: bool = true       ## orbit the camera around the car with the mouse (no auto-return)
+@export var mouse_sensitivity: float = 0.0014     ## orbit (radians) per pixel of mouse motion
+@export var look_pitch_limit_deg: float = 80.0    ## clamp the up / down orbit so the camera never crosses straight over the car; yaw is unlimited (full 360°)
 
 var _target: Node3D
 var _cam: Camera3D
 var _shake: float = 0.0
 var _snapped: bool = false
-var _look_yaw: float = 0.0      ## held mouse-look yaw (radians), full 360°; persists until you move the mouse
-var _look_pitch: float = 0.0    ## held mouse-look pitch (radians), clamped; persists until you move the mouse
+var _look_yaw: float = 0.0      ## held orbit yaw (radians), full 360°; persists until you move the mouse
+var _look_pitch: float = 0.0    ## held orbit pitch (radians), clamped; persists until you move the mouse
 
 
 func _ready() -> void:
@@ -51,17 +51,17 @@ func add_shake(amount: float) -> void:
 	_shake = minf(_shake + amount, 1.0)
 
 
-## Accumulate mouse motion into a held view offset (no auto-return). Handled in _input (not
+## Accumulate mouse motion into a held orbit angle (no auto-return). Handled in _input (not
 ## _unhandled_input) so a full-screen Control can never swallow it; the captured cursor (set in
-## game.gd) produces the relative-motion events. Non-inverted: right looks right, up looks up.
+## game.gd) produces the relative-motion events. Non-inverted: right orbits right, up orbits up.
 func _input(event: InputEvent) -> void:
 	if not mouse_look_enabled:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var motion := (event as InputEventMouseMotion).relative
-		# Yaw is unlimited (full 360° look-around); wrap to keep the accumulator tidy.
+		# Yaw orbits a full 360° around the car (look back swings the camera to the front); wrap to keep tidy.
 		_look_yaw = wrapf(_look_yaw - motion.x * mouse_sensitivity, -PI, PI)
-		# Pitch is clamped so the camera can look straight up / down but never rolls past vertical.
+		# Pitch orbits above / below, clamped so the camera never crosses straight over the car.
 		var pitch_limit := deg_to_rad(look_pitch_limit_deg)
 		_look_pitch = clampf(_look_pitch - motion.y * mouse_sensitivity, -pitch_limit, pitch_limit)
 
@@ -70,22 +70,22 @@ func _process(delta: float) -> void:
 	if _target == null:
 		return
 
-	# Smoothly chase a point behind / above the ship.
-	var desired := _target.global_position + offset
+	# Orbit the rest offset around the car: looking back swings the camera to the front, pitch
+	# lifts it above / drops it below. The distance to the car stays constant, so it is a true
+	# fly-around — and because we always look at the car (below), it stays framed from any angle.
+	var pivot := _target.global_position
+	var orbit := Basis.IDENTITY
+	if mouse_look_enabled:
+		orbit = Basis.from_euler(Vector3(_look_pitch, _look_yaw, 0.0))
+	var desired := pivot + orbit * offset
 	if not _snapped:
 		global_position = desired          # avoid an ugly swoop from the origin on frame 1
 		_snapped = true
 	else:
 		global_position = global_position.lerp(desired, 1.0 - exp(-follow_sharpness * delta))
 
-	# Look a little ahead of the ship (it always travels −Z) for a forward-leaning feel.
-	look_at(_target.global_position + Vector3(0.0, 0.0, -look_ahead), Vector3.UP)
-
-	# Free-look: hold the view at the accumulated mouse offset (no auto-return). Yaw spins a full
-	# 360°; pitch is clamped so the camera never rolls past straight up / down.
-	if mouse_look_enabled:
-		rotate_object_local(Vector3.UP, _look_yaw)
-		rotate_object_local(Vector3.RIGHT, _look_pitch)
+	# Always frame the car (aim a touch above its origin) so it is visible at every orbit angle.
+	look_at(pivot + Vector3(0.0, look_height, 0.0), Vector3.UP)
 
 	# Speed → FOV.
 	var ratio: float = 0.0
