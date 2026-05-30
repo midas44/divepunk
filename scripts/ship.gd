@@ -23,10 +23,13 @@ extends CharacterBody3D
 
 @export_group("Steering")
 @export var lateral_speed: float = 45.0     ## max sideways speed (m/s)
-@export var vertical_speed: float = 35.0    ## max climb / dive speed (m/s)
+@export var vertical_speed: float = 35.0    ## FLOOR for climb / dive speed (m/s) — keeps low-speed control; see vertical_speed_fraction
+@export var vertical_speed_fraction: float = 0.5  ## climb/dive also scales with forward speed (this × forward); the LARGER of it and vertical_speed wins. 0.5 ≈ a 27° climb at speed; set the floor to 0 for purely proportional vertical
 @export var steer_sharpness: float = 8.0    ## higher = snappier, lower = floatier
 @export var bank_angle_deg: float = 35.0    ## visual roll into turns (pure juice)
 @export var pitch_angle_deg: float = 15.0   ## visual pitch on climb / dive (pure juice)
+@export var invert_pitch: bool = true       ## true = nose pitches UP as you climb (natural arcade feel); false = the old nose-down tilt
+@export var invert_bank: bool = true        ## true = banks the opposite way into strafes; false = the old roll direction
 @export var visual_lerp: float = 10.0       ## how fast the model banks / pitches
 
 @export_group("Corridor (half-extents from centre)")
@@ -105,8 +108,11 @@ func _physics_process(delta: float) -> void:
 	)
 	_steer = _steer.lerp(target, 1.0 - exp(-steer_sharpness * delta))
 
-	# Compose velocity: constant forward (−Z) + steering on X / Y.
-	velocity = Vector3(_steer.x * lateral_speed, _steer.y * vertical_speed, -_forward_speed)
+	# Compose velocity: constant forward (−Z) + steering on X / Y. Vertical (climb/dive) speed
+	# scales with forward speed so faster flight = steeper climbs, with vertical_speed as a floor
+	# that keeps low-speed manoeuvring responsive.
+	var vert: float = maxf(vertical_speed, _forward_speed * vertical_speed_fraction)
+	velocity = Vector3(_steer.x * lateral_speed, _steer.y * vert, -_forward_speed)
 	move_and_slide()
 
 	_clamp_to_corridor()
@@ -117,6 +123,21 @@ func _physics_process(delta: float) -> void:
 
 func get_speed() -> float:
 	return _forward_speed
+
+
+## Current vertical speed (m/s): + climbing, − diving. Drives the HUD V-SPD indicator.
+func get_vertical_speed() -> float:
+	return velocity.y
+
+
+## Absolute top forward speed (m/s) reachable (ramp ceiling × boost). HUD horizontal-bar scale.
+func get_top_speed() -> float:
+	return max_speed * boost_multiplier
+
+
+## Top vertical speed (m/s) reachable at full forward speed. HUD V-SPD bar scale.
+func get_max_vertical_speed() -> float:
+	return maxf(vertical_speed, get_top_speed() * vertical_speed_fraction)
 
 
 ## 0..1 fraction of the tank remaining (fuel-seconds / capacity). Drives the HUD bar.
@@ -205,11 +226,15 @@ func _clamp_to_corridor() -> void:
 func _bank_model(delta: float) -> void:
 	if _model == null:
 		return
-	# Roll into lateral turns, pitch into vertical movement.
+	# Roll into lateral turns, pitch into vertical movement. The sign flips are exposed
+	# (invert_pitch / invert_bank) so the nose pitches UP on a climb and strafes bank the way
+	# that feels right — tune in settings.cfg [ship].
+	var pitch_sign: float = 1.0 if invert_pitch else -1.0
+	var bank_sign: float = 1.0 if invert_bank else -1.0
 	var target_rot := Vector3(
-		deg_to_rad(-_steer.y * pitch_angle_deg),
+		deg_to_rad(pitch_sign * _steer.y * pitch_angle_deg),
 		0.0,
-		deg_to_rad(-_steer.x * bank_angle_deg)
+		deg_to_rad(bank_sign * _steer.x * bank_angle_deg)
 	)
 	_model.rotation = _model.rotation.lerp(target_rot, 1.0 - exp(-visual_lerp * delta))
 
