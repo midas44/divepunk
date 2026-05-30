@@ -29,6 +29,10 @@ window/size/viewport_height=720
 3d_physics/layer_1="ship"
 3d_physics/layer_2="obstacles"
 
+[physics]
+
+common/physics_ticks_per_second=160
+
 [rendering]
 
 renderer/rendering_method="forward_plus"

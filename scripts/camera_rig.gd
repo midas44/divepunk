@@ -1,16 +1,23 @@
 extends Node3D
-## Chase camera that orbits the car on a fixed-radius boom (mouse free-look), with speed-driven
-## FOV and shake — DIVEPUNK, milestone M1.
+## Chase camera on a RIGID orbit boom (mouse free-look), with speed-driven FOV and shake —
+## DIVEPUNK, milestone M1.
 ##
 ## Put this Node3D in the scene; it creates a Camera3D child named "Camera" if one isn't present.
-## Call set_target(ship) to follow the ship — game.gd does this for you. The mouse flies the camera
-## AROUND the car and always looks straight at it, so the car stays framed from any angle — including
-## directly above or below. FOV widening with speed is the single most effective "this feels fast"
-## trick, so the FOV range here is worth tuning alongside the ship's speed values.
+## Call set_target(ship) to follow the ship — game.gd does this for you.
+##
+## The camera sits on a fixed-length boom and orbits the car: the mouse flies it AROUND the car
+## (look back swings it to the front), and it always points straight at the car, so the car stays
+## dead-centre and visible from any angle — including directly above or below. The boom is RIGID
+## (no follow-lag) on purpose: an earlier smoothed pivot trailed the car by ~speed/sharpness
+## metres, which at flight speed exceeded the boom length and pinned the camera behind the car at
+## every angle. Smoothness instead comes from the physics tick matching the render rate (see
+## project.godot physics_ticks_per_second) so the car never judders against the world.
+##
+## FOV widening with speed is the single most effective "this feels fast" trick, so the FOV range
+## here is worth tuning alongside the ship's speed values.
 
 @export_group("Follow")
-@export var offset: Vector3 = Vector3(0.0, 4.0, 12.0)  ## rest pose: behind (+Z) and above the car; its length is the orbit radius
-@export var follow_sharpness: float = 6.0              ## how quickly the boom's pivot trails the car (lower = floatier)
+@export var offset: Vector3 = Vector3(0.0, 4.0, 12.0)  ## boom: behind (+Z) and above the car; its length is the orbit radius
 
 @export_group("FOV")
 @export var base_fov: float = 70.0
@@ -29,8 +36,6 @@ extends Node3D
 var _target: Node3D
 var _cam: Camera3D
 var _shake: float = 0.0
-var _snapped: bool = false
-var _smooth_pivot: Vector3 = Vector3.ZERO   ## smoothed point the boom orbits (trails the car)
 var _look_yaw: float = 0.0      ## held orbit yaw (radians), full 360°; persists until you move the mouse
 var _look_pitch: float = 0.0    ## held orbit pitch (radians), clamped to ±limit; persists until you move the mouse
 
@@ -72,23 +77,16 @@ func _process(delta: float) -> void:
 	if _target == null:
 		return
 
-	# Smoothly trail the car with the boom's pivot. This is the only lag in the rig; the orbit
-	# itself is rigid, so swinging the view never feels mushy or "starved" by the car's forward speed.
+	# Rigid boom: orbit the camera around the car's ACTUAL position (no follow-lag). One spin
+	# rotates both the boom offset and the camera's orientation, so the camera always faces the
+	# car with no look_at — reaching directly above / below with no pole degeneracy, and keeping
+	# the car dead-centre at every angle (the lag-free boom is what lets the orbit reach the front).
 	var pivot := _target.global_position
-	if not _snapped:
-		_smooth_pivot = pivot
-		_snapped = true
-	else:
-		_smooth_pivot = _smooth_pivot.lerp(pivot, 1.0 - exp(-follow_sharpness * delta))
-
-	# Rigid orbit: rotate BOTH the boom offset and the camera's orientation by the same spin, so the
-	# camera always looks straight at the car — at any angle, including directly above / below, with
-	# no look_at degeneracy at the poles. rest aims the camera's −Z at the car from the rest pose.
 	var spin := Basis.IDENTITY
 	if mouse_look_enabled:
 		spin = Basis.from_euler(Vector3(_look_pitch, _look_yaw, 0.0))
-	var rest := Basis.looking_at(-offset, Vector3.UP)
-	global_transform = Transform3D(spin * rest, _smooth_pivot + spin * offset)
+	var rest := Basis.looking_at(-offset, Vector3.UP)   # aim the camera's −Z at the car from the rest pose
+	global_transform = Transform3D(spin * rest, pivot + spin * offset)
 
 	# Speed → FOV.
 	var ratio: float = 0.0
