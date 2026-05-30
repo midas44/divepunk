@@ -64,7 +64,7 @@ func _spawn_ship_and_camera() -> void:
 
 
 ## Spawns the M2 streaming city around the ship. World seed + debug flags come from the
-## Config autoload (edit config/settings.cfg to change them).
+## Config autoload (edit settings/settings.cfg to change them).
 func _spawn_world() -> void:
 	if get_node_or_null(^"ChunkManager") != null:
 		return

@@ -1,11 +1,11 @@
 extends Node
-## Config — loads res://config/settings.cfg at boot and applies display settings.
+## Config — loads res://settings/settings.cfg at boot and applies display settings.
 ##
 ## INI-style file parsed by Godot's native ConfigFile (zero dependencies). Registered
 ## as the "Config" autoload, so any script can read a value via Config.get_value(...).
-## See config/settings.cfg for the available keys and what they do.
+## See settings/settings.cfg for the available keys and what they do.
 
-const CONFIG_PATH := "res://config/settings.cfg"
+const CONFIG_PATH := "res://settings/settings.cfg"
 
 var _cfg := ConfigFile.new()
 var _loaded: bool = false
