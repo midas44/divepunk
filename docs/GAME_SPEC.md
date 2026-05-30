@@ -208,22 +208,22 @@ Keep scenes **small and composable** — it makes AI-assisted edits far more rel
 Ordered **by risk**: prove the fun before building content, prove it's a game before making it pretty, and validate Android before it's too late to fix. Implement one milestone at a time and **playtest between each.**
 
 ### M0 — Project skeleton
-- [ ] Create Godot 4.6 project; init Git + `.gitignore`.
-- [ ] `Main.tscn` with a ship that moves forward through empty space + a follow `Camera3D`.
-- [ ] Wire `InputMap` actions + keyboard steering.
-- [ ] **Goal:** something moves and the camera follows.
+- [x] Create Godot 4.6 project; init Git + `.gitignore`.
+- [x] `Main.tscn` with a ship that moves forward through empty space + a follow `Camera3D`.
+- [x] Wire `InputMap` actions + keyboard steering.
+- [x] **Goal:** something moves and the camera follows.
 
 ### M1 — Flight feel *(the make-or-break milestone)*
-- [ ] Tune forward speed, steering response, smoothing, corridor clamps.
-- [ ] Boost burst + speed ramp.
-- [ ] FOV-on-speed, basic speed lines, basic screen shake.
-- [ ] **Goal:** flying feels *great* in an empty void. Do not proceed until it does.
+- [x] Tune forward speed, steering response, smoothing, corridor clamps.
+- [x] Boost burst + speed ramp.
+- [x] FOV-on-speed and basic screen shake. *(Speed lines deferred — fold into M4 juice pass.)*
+- [x] **Goal:** flying feels *great* in an empty void. *(Playtested & approved 2026-05-30.)*
 
 ### M2 — Procedural corridor
-- [ ] `CityChunk.tscn` with buildings via `MultiMeshInstance3D`.
-- [ ] `ChunkManager`: spawn-ahead / recycle-behind with an object pool.
-- [ ] Seed + difficulty parametrization; threaded/amortized generation.
-- [ ] **Goal:** an endless city to fly through, no hitches.
+- [x] `CityChunk.tscn` with buildings via `MultiMeshInstance3D`.
+- [x] `ChunkManager`: spawn-ahead / recycle-behind with an object pool.
+- [x] Seed + difficulty parametrization; threaded/amortized generation.
+- [x] **Goal:** an endless city to fly through, no hitches.
 
 ### M3 — Game loop
 - [ ] Obstacles + Jolt collision → game-over state.
