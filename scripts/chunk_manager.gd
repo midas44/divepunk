@@ -31,6 +31,8 @@ const CityChunkScene := preload("res://scenes/world/CityChunk.tscn")
 
 @export_group("Corridor")
 @export var corridor_half_width: float = 120.0  ## clear flyable half-width; pushed to each chunk so buildings set back to match the ship's bound_x
+@export var corridor_floor: float = 4.0          ## corridor floor; pushed to each chunk so obstacles fill the full height
+@export var corridor_ceiling: float = 1700.0     ## corridor ceiling; pushed to each chunk so obstacles fill the full height
 
 @export_group("Debug")
 @export var log_streaming: bool = false      ## print spawn/recycle events to the console
@@ -74,6 +76,8 @@ func _create_pool() -> void:
 		c.chunk_length = chunk_length
 		c.world_scale = world_scale
 		c.corridor_half_width = corridor_half_width
+		c.corridor_floor = corridor_floor
+		c.corridor_ceiling = corridor_ceiling
 		add_child(c)
 		_pool.append(c)
 

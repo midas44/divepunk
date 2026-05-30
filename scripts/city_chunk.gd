@@ -24,6 +24,8 @@ const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (see
 
 @export_group("Corridor")
 @export var corridor_half_width: float = 120.0   ## clear flyable half-width (set by ChunkManager from settings.cfg [corridor] half_width)
+@export var corridor_floor: float = 4.0          ## corridor floor in metres (set by ChunkManager from [corridor] floor)
+@export var corridor_ceiling: float = 1700.0     ## corridor ceiling in metres (set by ChunkManager from [corridor] ceiling)
 
 @export_group("Buildings")
 @export var columns_per_side: int = 3            ## building rows stacked outward from the corridor
@@ -41,9 +43,8 @@ const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (see
 @export var safe_chunks: int = 2                 ## first N chunks have no obstacles (a warm-up runway)
 @export var min_obstacles: int = 1               ## obstacle count at lowest difficulty (past the warm-up)
 @export var max_obstacles: int = 6               ## obstacle count at full difficulty (also the pool size)
-@export var obstacle_x_range: float = 50.0       ## obstacles span +/- this on X (inside the ship's bounds)
-@export var obstacle_y_min: float = 10.0
-@export var obstacle_y_max: float = 78.0
+@export_range(0.0, 1.0) var obstacle_x_fraction: float = 0.85  ## obstacles span ± this fraction of the corridor half-width
+@export_range(0.0, 1.0) var obstacle_y_fraction: float = 0.85  ## ...and this fraction of the floor→ceiling height, centred
 @export var obstacle_min_size: Vector3 = Vector3(4.0, 6.0, 4.0)
 @export var obstacle_max_size: Vector3 = Vector3(12.0, 44.0, 12.0)
 
@@ -149,11 +150,15 @@ func _generate_obstacles(base_seed: int, p_index: int, diff: float) -> void:
 			rng.randf_range(obstacle_min_size.y, obstacle_max_size.y),
 			rng.randf_range(obstacle_min_size.z, obstacle_max_size.z)
 		)
-		# Spread the active obstacles along the chunk's length, jittered within their slot.
+		# Spread the active obstacles along the chunk's length, jittered within their slot,
+		# and across the FULL corridor cross-section on X and Y (not just a central box).
 		var slot: float = (float(i) + rng.randf_range(0.2, 0.8)) / float(maxi(count, 1))
+		var x_span: float = corridor_half_width * obstacle_x_fraction
+		var y_lo: float = lerpf(corridor_floor, corridor_ceiling, 0.5 - 0.5 * obstacle_y_fraction)
+		var y_hi: float = lerpf(corridor_floor, corridor_ceiling, 0.5 + 0.5 * obstacle_y_fraction)
 		var pos := Vector3(
-			rng.randf_range(-obstacle_x_range, obstacle_x_range),
-			rng.randf_range(obstacle_y_min, obstacle_y_max),
+			rng.randf_range(-x_span, x_span),
+			rng.randf_range(y_lo, y_hi),
 			-slot * chunk_length
 		)
 		ob.position = pos

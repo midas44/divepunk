@@ -98,6 +98,8 @@ func _spawn_world() -> void:
 	_mgr.log_streaming = bool(_cfg_value("debug", "log_streaming", false))
 	_mgr.world_scale = float(_cfg_value("game", "scale", 2.0))
 	_mgr.corridor_half_width = float(_cfg_value("corridor", "half_width", _mgr.corridor_half_width))
+	_mgr.corridor_floor = float(_cfg_value("corridor", "floor", _mgr.corridor_floor))
+	_mgr.corridor_ceiling = float(_cfg_value("corridor", "ceiling", _mgr.corridor_ceiling))
 	add_child(_mgr)
 	_mgr.set_target(_ship)
 
