@@ -67,6 +67,7 @@ func _spawn_ship_and_camera() -> void:
 		_ship = CharacterBody3D.new()
 		_ship.name = "Ship"
 		_ship.set_script(ShipScript)   # set script BEFORE add_child so _ready() runs with it
+		_apply_ship_config(_ship)      # apply config exports BEFORE add_child so _ready() initialises with them
 		add_child(_ship)
 		_ship.global_position = Vector3(0.0, 30.0, 0.0)
 
@@ -95,6 +96,7 @@ func _spawn_world() -> void:
 	_mgr.world_seed = int(_cfg_value("game", "seed", 0))
 	_mgr.log_streaming = bool(_cfg_value("debug", "log_streaming", false))
 	_mgr.world_scale = float(_cfg_value("game", "scale", 2.0))
+	_mgr.corridor_half_width = float(_cfg_value("corridor", "half_width", _mgr.corridor_half_width))
 	add_child(_mgr)
 	_mgr.set_target(_ship)
 
@@ -147,6 +149,21 @@ func _cfg_value(section: String, key: String, default: Variant) -> Variant:
 	if cfg != null and cfg.has_method(&"get_value"):
 		return cfg.get_value(section, key, default)
 	return default
+
+
+## Pushes the config-driven ship tunables onto the ship before it enters the tree, so _ready()
+## initialises with them. The speed model lives in settings.cfg [ship]; the flyable corridor's
+## horizontal half-width and vertical floor/ceiling live in [corridor]. Each falls back to the
+## ship's own @export default when the key is absent.
+func _apply_ship_config(ship: CharacterBody3D) -> void:
+	ship.base_speed = float(_cfg_value("ship", "base_speed", ship.base_speed))
+	ship.max_speed = float(_cfg_value("ship", "max_speed", ship.max_speed))
+	ship.boost_multiplier = float(_cfg_value("ship", "boost_multiplier", ship.boost_multiplier))
+	ship.boost_in_rate = float(_cfg_value("ship", "boost_in_rate", ship.boost_in_rate))
+	ship.boost_out_rate = float(_cfg_value("ship", "boost_out_rate", ship.boost_out_rate))
+	ship.bound_x = float(_cfg_value("corridor", "half_width", ship.bound_x))
+	ship.bound_y_min = float(_cfg_value("corridor", "floor", ship.bound_y_min))
+	ship.bound_y_max = float(_cfg_value("corridor", "ceiling", ship.bound_y_max))
 
 
 func _ensure_environment() -> void:

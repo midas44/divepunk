@@ -16,7 +16,7 @@ const CityChunkScene := preload("res://scenes/world/CityChunk.tscn")
 
 @export_group("Streaming")
 @export var chunk_length: float = 200.0      ## metres per chunk (pushed down to each CityChunk)
-@export var chunks_ahead: int = 6            ## how many chunks to keep generated ahead of the ship
+@export var chunks_ahead: int = 14           ## chunks kept generated ahead of the ship (× chunk_length = draw distance)
 @export var chunks_behind: int = 1           ## how many to keep behind (so the player isn't on the edge)
 @export var builds_per_frame: int = 1        ## amortisation cap: max chunk (re)builds per frame
 
@@ -28,6 +28,9 @@ const CityChunkScene := preload("res://scenes/world/CityChunk.tscn")
 
 @export_group("Scale")
 @export var world_scale: float = 2.0         ## enlarges the city (buildings) around the constant-size car; pushed to each chunk. 1.0 = original
+
+@export_group("Corridor")
+@export var corridor_half_width: float = 120.0  ## clear flyable half-width; pushed to each chunk so buildings set back to match the ship's bound_x
 
 @export_group("Debug")
 @export var log_streaming: bool = false      ## print spawn/recycle events to the console
@@ -70,6 +73,7 @@ func _create_pool() -> void:
 		var c := CityChunkScene.instantiate() as CityChunk
 		c.chunk_length = chunk_length
 		c.world_scale = world_scale
+		c.corridor_half_width = corridor_half_width
 		add_child(c)
 		_pool.append(c)
 

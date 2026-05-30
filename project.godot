@@ -37,3 +37,4 @@ common/physics_ticks_per_second=160
 
 renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="forward_plus"
+anti_aliasing/quality/use_debanding=true

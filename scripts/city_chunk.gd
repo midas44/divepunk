@@ -23,7 +23,7 @@ const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (see
 @export var chunk_length: float = 200.0          ## metres along -Z (ChunkManager keeps this in sync)
 
 @export_group("Corridor")
-@export var corridor_half_width: float = 70.0    ## clear flyable half-width (ship bound_x is 60)
+@export var corridor_half_width: float = 120.0   ## clear flyable half-width (set by ChunkManager from settings.cfg [corridor] half_width)
 
 @export_group("Buildings")
 @export var columns_per_side: int = 3            ## building rows stacked outward from the corridor

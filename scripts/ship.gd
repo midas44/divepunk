@@ -14,11 +14,12 @@ extends CharacterBody3D
 ## ship around. The near-miss query (a slightly larger box, spec §7.5) lands in M3b.
 
 @export_group("Speed")
-@export var base_speed: float = 60.0        ## forward speed at the start of a run (m/s)
-@export var max_speed: float = 160.0        ## ceiling the run-ramp climbs toward (m/s)
+@export var base_speed: float = 70.0        ## forward speed at the start of a run (m/s)
+@export var max_speed: float = 220.0        ## ceiling the run-ramp climbs toward (m/s)
 @export var ramp_per_second: float = 1.5    ## how fast the speed floor grows over a run
-@export var boost_multiplier: float = 1.8   ## speed multiplier while boosting
-@export var boost_blend_rate: float = 6.0   ## how quickly boost eases in / out
+@export var boost_multiplier: float = 2.4   ## speed multiplier while boosting (bigger = more speed variation)
+@export var boost_in_rate: float = 7.0      ## how quickly boost eases IN when held (higher = snappier kick)
+@export var boost_out_rate: float = 1.6     ## how quickly boost eases OUT when released (lower = more gradual bleed-off, not a sharp drop)
 
 @export_group("Steering")
 @export var lateral_speed: float = 45.0     ## max sideways speed (m/s)
@@ -29,9 +30,9 @@ extends CharacterBody3D
 @export var visual_lerp: float = 10.0       ## how fast the model banks / pitches
 
 @export_group("Corridor (half-extents from centre)")
-@export var bound_x: float = 60.0
-@export var bound_y_min: float = 4.0
-@export var bound_y_max: float = 90.0
+@export var bound_x: float = 120.0          ## horizontal half-width; set from settings.cfg [corridor] half_width
+@export var bound_y_min: float = 4.0        ## floor; settings.cfg [corridor] floor
+@export var bound_y_max: float = 1700.0     ## ceiling; settings.cfg [corridor] ceiling (set slightly above the rooftops)
 
 @export_group("Collision")
 @export var crash_size: Vector3 = Vector3(3.0, 1.0, 5.0)    ## crash hitbox (matches the ship body)
@@ -90,7 +91,11 @@ func _physics_process(delta: float) -> void:
 		_boost_meter = maxf(0.0, _boost_meter - boost_drain * delta)
 	else:
 		_boost_meter = minf(boost_capacity, _boost_meter + boost_regen * delta)
-	_boost_blend = move_toward(_boost_blend, 1.0 if boosting else 0.0, boost_blend_rate * delta)
+	# Ease the boost blend with framerate-independent smoothing. The OUT rate is slower than the
+	# IN rate, so releasing boost bleeds the speed off gradually instead of dropping it sharply.
+	var blend_target: float = 1.0 if boosting else 0.0
+	var blend_rate: float = boost_in_rate if boosting else boost_out_rate
+	_boost_blend = lerpf(_boost_blend, blend_target, 1.0 - exp(-blend_rate * delta))
 	_forward_speed = _speed_floor * lerpf(1.0, boost_multiplier, _boost_blend)
 
 	# Smooth raw input toward target for a weighty-but-responsive feel (framerate independent).
