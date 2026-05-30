@@ -34,40 +34,57 @@ extends CharacterBody3D
 @export var bound_y_max: float = 90.0
 
 @export_group("Collision")
-@export var crash_size: Vector3 = Vector3(3.0, 1.0, 5.0)   ## crash hitbox (matches the ship body)
+@export var crash_size: Vector3 = Vector3(3.0, 1.0, 5.0)    ## crash hitbox (matches the ship body)
+@export var near_miss_size: Vector3 = Vector3(16.0, 12.0, 14.0)  ## "danger bubble" around the ship (spec §7.5)
+
+@export_group("Boost economy")
+@export var boost_meter_start: float = 0.5   ## meter at run start (0..1)
+@export var boost_drain: float = 0.45        ## meter spent per second while boosting
+@export var boost_gain_per_near_miss: float = 0.18  ## meter refilled per near-miss
 
 ## 1-indexed physics layer obstacles live on (matches city_chunk.gd / project.godot).
 const OBSTACLE_LAYER := 2
 
 ## Emitted every physics frame. ratio is 0 at the run's start speed, 1 at full boost.
 signal speed_changed(speed: float, ratio: float, boosting: bool)
+## Emitted once per obstacle that enters the near-miss bubble without a crash (spec §7.5).
+signal near_miss
 ## Emitted once when the ship crashes.
 signal crashed
 
 var _speed_floor: float = 0.0
 var _forward_speed: float = 0.0
 var _boost_blend: float = 0.0
+var _boost_meter: float = 0.0
 var _steer: Vector2 = Vector2.ZERO
 var _model: Node3D
 var _alive: bool = true
 var _crash_shape: BoxShape3D
 var _crash_query: PhysicsShapeQueryParameters3D
+var _near_shape: BoxShape3D
+var _near_query: PhysicsShapeQueryParameters3D
+var _near_now: Dictionary = {}   ## instance_id -> true for obstacles currently in the bubble
 
 
 func _ready() -> void:
 	_speed_floor = base_speed
 	_forward_speed = base_speed
+	_boost_meter = clampf(boost_meter_start, 0.0, 1.0)
 	_ensure_visual_and_collision()
-	_build_crash_query()
+	_build_queries()
 
 
 func _physics_process(delta: float) -> void:
 	if not _alive:
 		return
 
-	# Ramp the speed floor across the run, then ease boost on top of it.
+	# Ramp the speed floor across the run, then ease boost on top of it. Boosting is gated by
+	# the boost meter — hold the action AND have fuel; the meter drains while boosting and is
+	# refilled by near-misses (the risk/reward economy, spec §5.3).
 	_speed_floor = minf(_speed_floor + ramp_per_second * delta, max_speed)
-	var boosting: bool = Input.is_action_pressed(&"boost")
+	var boosting: bool = Input.is_action_pressed(&"boost") and _boost_meter > 0.0
+	if boosting:
+		_boost_meter = maxf(0.0, _boost_meter - boost_drain * delta)
 	_boost_blend = move_toward(_boost_blend, 1.0 if boosting else 0.0, boost_blend_rate * delta)
 	_forward_speed = _speed_floor * lerpf(1.0, boost_multiplier, _boost_blend)
 
@@ -84,12 +101,22 @@ func _physics_process(delta: float) -> void:
 
 	_clamp_to_corridor()
 	_bank_model(delta)
-	_check_crash()
+	_check_obstacles()
 	speed_changed.emit(_forward_speed, get_speed_ratio(), boosting)
 
 
 func get_speed() -> float:
 	return _forward_speed
+
+
+## 0..1 fuel remaining in the boost meter. Drives the HUD bar.
+func get_boost_meter() -> float:
+	return _boost_meter
+
+
+## Refill the boost meter (called on a near-miss). amount is in 0..1 units.
+func add_boost(amount: float) -> void:
+	_boost_meter = clampf(_boost_meter + amount, 0.0, 1.0)
 
 
 ## 0 at the run's starting speed, 1 at fully boosted top speed. Drives camera FOV, speed
@@ -106,21 +133,41 @@ func crash() -> void:
 	crashed.emit()
 
 
-## Shape-query the obstacles layer at the ship's position. Any hit = a crash. Runs in
-## _physics_process so direct_space_state is valid; masks to OBSTACLE_LAYER so it never
-## hits the ship's own body.
-func _check_crash() -> void:
+## Shape-query the obstacles layer at the ship's position each frame. An inner (body-sized)
+## box = crash; an outer "danger bubble" box = near-miss. Runs in _physics_process so
+## direct_space_state is valid; masks to OBSTACLE_LAYER so it never hits the ship's own body.
+func _check_obstacles() -> void:
 	if not _alive or _crash_query == null:
 		return
 	var space := get_world_3d().direct_space_state
 	if space == null:
 		return
-	_crash_query.transform = Transform3D(Basis(), global_position)
+	var xform := Transform3D(Basis(), global_position)
+
+	# Inner: any hit is a crash (and ends the frame's checks).
+	_crash_query.transform = xform
 	if not space.intersect_shape(_crash_query, 1).is_empty():
 		crash()
+		return
+
+	# Outer: obstacles in the bubble (but not the body) are near-misses. Fire once per
+	# obstacle, the first frame it enters the bubble; track who's currently inside so the
+	# same obstacle doesn't re-trigger every frame as the ship passes it.
+	_near_query.transform = xform
+	var hits := space.intersect_shape(_near_query, 8)
+	var current: Dictionary = {}
+	for h: Dictionary in hits:
+		var col: Object = h.get("collider")
+		if col == null:
+			continue
+		var id: int = col.get_instance_id()
+		current[id] = true
+		if not _near_now.has(id):
+			near_miss.emit()
+	_near_now = current
 
 
-func _build_crash_query() -> void:
+func _build_queries() -> void:
 	_crash_shape = BoxShape3D.new()
 	_crash_shape.size = crash_size
 	_crash_query = PhysicsShapeQueryParameters3D.new()
@@ -128,6 +175,14 @@ func _build_crash_query() -> void:
 	_crash_query.collision_mask = 1 << (OBSTACLE_LAYER - 1)   # only the obstacles layer
 	_crash_query.collide_with_bodies = true
 	_crash_query.collide_with_areas = false
+
+	_near_shape = BoxShape3D.new()
+	_near_shape.size = near_miss_size
+	_near_query = PhysicsShapeQueryParameters3D.new()
+	_near_query.shape = _near_shape
+	_near_query.collision_mask = 1 << (OBSTACLE_LAYER - 1)
+	_near_query.collide_with_bodies = true
+	_near_query.collide_with_areas = false
 
 
 func _clamp_to_corridor() -> void:

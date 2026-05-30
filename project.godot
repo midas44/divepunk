@@ -17,6 +17,7 @@ config/features=PackedStringArray("4.6", "Forward Plus")
 [autoload]
 
 Config="*res://autoload/config.gd"
+ScoreManager="*res://autoload/score_manager.gd"
 
 [display]
 

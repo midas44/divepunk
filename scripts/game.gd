@@ -13,11 +13,17 @@ const ShipScript := preload("res://scripts/ship.gd")
 const CameraRigScript := preload("res://scripts/camera_rig.gd")
 const ChunkManagerScene := preload("res://scenes/world/ChunkManager.tscn")
 const GameOverScene := preload("res://scenes/ui/GameOver.tscn")
+const HUDScene := preload("res://scenes/ui/HUD.tscn")
+
+@export_group("Juice")
+@export var shake_on_near_miss: float = 0.25
+@export var shake_on_crash: float = 1.0
 
 var _ship: CharacterBody3D
 var _rig: Node3D
 var _mgr: ChunkManager
 var _game_over: GameOverScreen
+var _hud: HUD
 
 
 func _ready() -> void:
@@ -53,6 +59,8 @@ func _spawn_ship_and_camera() -> void:
 		_rig.set_target(_ship)
 	if _ship.has_signal(&"crashed"):
 		_ship.crashed.connect(_on_ship_crashed)
+	if _ship.has_signal(&"near_miss"):
+		_ship.near_miss.connect(_on_ship_near_miss)
 
 
 ## Spawns the M2 streaming city around the ship. World seed + debug flags come from the
@@ -68,19 +76,46 @@ func _spawn_world() -> void:
 	_mgr.set_target(_ship)
 
 
-## Spawns the UI overlays. M3a: the Game Over screen (HUD arrives in M3b).
+## Spawns the UI overlays: the in-run HUD and the Game Over screen. A fresh ScoreManager
+## run is started here so a scene reload (restart) zeroes the score.
 func _spawn_ui() -> void:
-	if get_node_or_null(^"GameOver") != null:
+	if get_node_or_null(^"HUD") != null:
 		return
+	ScoreManager.reset_run()
+
+	_hud = HUDScene.instantiate() as HUD
+	_hud.name = "HUD"
+	add_child(_hud)
+	_hud.set_ship(_ship)
+
 	_game_over = GameOverScene.instantiate() as GameOverScreen
 	_game_over.name = "GameOver"
 	add_child(_game_over)
 
 
+func _process(_delta: float) -> void:
+	# Drive the score: distance is how far the ship has flown (-Z), plus the decaying combo.
+	if _ship != null:
+		ScoreManager.set_distance(-_ship.global_position.z)
+	ScoreManager.tick(_delta)
+
+
+func _on_ship_near_miss() -> void:
+	ScoreManager.register_near_miss()
+	if _ship.has_method(&"add_boost"):
+		_ship.add_boost(_ship.boost_gain_per_near_miss)
+	if _rig != null and _rig.has_method(&"add_shake"):
+		_rig.add_shake(shake_on_near_miss)
+
+
 func _on_ship_crashed() -> void:
-	print("[DIVEPUNK] crashed — game over")
+	var is_best := ScoreManager.end_run()
+	print("[DIVEPUNK] crashed — score %d (best %d%s)"
+		% [ScoreManager.get_score(), ScoreManager.high_score, ", NEW BEST" if is_best else ""])
+	if _rig != null and _rig.has_method(&"add_shake"):
+		_rig.add_shake(shake_on_crash)
 	if _game_over != null:
-		_game_over.show_over()
+		_game_over.show_over(ScoreManager.get_score(), ScoreManager.high_score, is_best)
 
 
 ## Safe read from the Config autoload (falls back to the default if it isn't present).
