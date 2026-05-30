@@ -35,6 +35,7 @@ const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (see
 @export var max_height: float = 130.0
 @export_range(0.0, 1.0) var fill_chance: float = 0.86   ## per-slot chance of a building (gaps add variety)
 @export_range(0.0, 1.0) var cell_depth_jitter: float = 0.35
+@export var world_scale: float = 1.0   ## set by ChunkManager; >1 enlarges buildings + spacing around the constant-size car (1.0 = original)
 
 @export_group("Obstacles")
 @export var safe_chunks: int = 2                 ## first N chunks have no obstacles (a warm-up runway)
@@ -75,25 +76,47 @@ func generate(p_index: int, base_seed: int, difficulty: float) -> void:
 
 
 func _generate_buildings(base_seed: int, p_index: int, diff: float) -> void:
+	# Compute the layout (pure, testable), then upload it to the MultiMesh.
+	var layout := compute_building_layout(base_seed, p_index, diff)
+	var transforms: Array[Transform3D] = layout["transforms"]
+	var colors: PackedColorArray = layout["colors"]
+	_mm.instance_count = transforms.size()
+	for i: int in transforms.size():
+		_mm.set_instance_transform(i, transforms[i])
+		_mm.set_instance_color(i, colors[i])
+
+
+## Deterministically computes this chunk's building transforms + colors (no rendering side effects,
+## so it's unit-testable headless where MultiMesh readback isn't). Returns {transforms, colors}.
+##
+## world_scale enlarges the whole city around the (constant-size) car: bigger footprints and
+## heights, with row/column spacing widened to match so the building:gap ratio stays put. Fewer,
+## larger rows per chunk keep that ratio identical, so world_scale = 1.0 reproduces the original
+## city exactly. corridor_half_width is deliberately NOT scaled, so the towers loom at the same
+## distance (that's what makes them read as bigger relative to the car, instead of just receding).
+func compute_building_layout(base_seed: int, p_index: int, diff: float) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = _mix_seed(base_seed, p_index, 0)
-	var row_spacing: float = chunk_length / float(maxi(rows_per_chunk, 1))
+	var scale: float = maxf(world_scale, 0.01)
+	var eff_rows: int = maxi(1, roundi(float(rows_per_chunk) / scale))
+	var row_spacing: float = chunk_length / float(eff_rows)
 
 	var transforms: Array[Transform3D] = []
 	var colors := PackedColorArray()
 
 	for side: float in [-1.0, 1.0]:
 		for col: int in columns_per_side:
-			var col_x: float = side * (corridor_half_width + column_spacing * (float(col) + 0.5))
-			for row: int in rows_per_chunk:
+			var col_x: float = side * (corridor_half_width + column_spacing * scale * (float(col) + 0.5))
+			for row: int in eff_rows:
 				if rng.randf() > fill_chance:
 					continue   # leave a gap
-				var fx: float = rng.randf_range(min_footprint, max_footprint)
-				var fz: float = rng.randf_range(min_footprint, max_footprint)
+				var fx: float = rng.randf_range(min_footprint, max_footprint) * scale
+				var fz: float = rng.randf_range(min_footprint, max_footprint) * scale
 				var height: float = rng.randf_range(min_height, max_height)
 				height *= 0.65 + 0.35 * diff        # taller as difficulty ramps
 				height *= 1.0 + 0.12 * float(col)    # outer columns a touch taller
-				var x: float = col_x + rng.randf_range(-3.0, 3.0)
+				height *= scale                      # ...and overall bigger with world_scale
+				var x: float = col_x + rng.randf_range(-3.0, 3.0) * scale
 				var z: float = -(float(row) + 0.5) * row_spacing \
 					+ rng.randf_range(-row_spacing, row_spacing) * cell_depth_jitter
 				var yaw: float = rng.randf_range(-0.12, 0.12)
@@ -101,10 +124,7 @@ func _generate_buildings(base_seed: int, p_index: int, diff: float) -> void:
 				transforms.append(Transform3D(basis, Vector3(x, height * 0.5, z)))
 				colors.append(Color.from_hsv(rng.randf(), 0.22, rng.randf_range(0.12, 0.30)))
 
-	_mm.instance_count = transforms.size()
-	for i: int in transforms.size():
-		_mm.set_instance_transform(i, transforms[i])
-		_mm.set_instance_color(i, colors[i])
+	return {"transforms": transforms, "colors": colors}
 
 
 func _generate_obstacles(base_seed: int, p_index: int, diff: float) -> void:

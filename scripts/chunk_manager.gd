@@ -26,6 +26,9 @@ const CityChunkScene := preload("res://scenes/world/CityChunk.tscn")
 @export var difficulty_ramp: float = 0.012   ## difficulty added per chunk index
 @export_range(0.0, 1.0) var max_difficulty: float = 1.0
 
+@export_group("Scale")
+@export var world_scale: float = 2.0         ## enlarges the city (buildings) around the constant-size car; pushed to each chunk. 1.0 = original
+
 @export_group("Debug")
 @export var log_streaming: bool = false      ## print spawn/recycle events to the console
 
@@ -66,6 +69,7 @@ func _create_pool() -> void:
 	for i: int in _pool_size:
 		var c := CityChunkScene.instantiate() as CityChunk
 		c.chunk_length = chunk_length
+		c.world_scale = world_scale
 		add_child(c)
 		_pool.append(c)
 

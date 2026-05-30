@@ -94,6 +94,7 @@ func _spawn_world() -> void:
 	_mgr.name = "ChunkManager"
 	_mgr.world_seed = int(_cfg_value("game", "seed", 0))
 	_mgr.log_streaming = bool(_cfg_value("debug", "log_streaming", false))
+	_mgr.world_scale = float(_cfg_value("game", "scale", 2.0))
 	add_child(_mgr)
 	_mgr.set_target(_ship)
 
