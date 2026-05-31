@@ -53,6 +53,7 @@ func _ready() -> void:
 	_spawn_traffic()
 	_spawn_ui()
 	_spawn_screen_fx()
+	_audio_call(&"start_music")
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -189,8 +190,10 @@ func _on_ship_speed_changed(_speed: float, ratio: float, boosting: bool) -> void
 	if _fx != null:
 		_fx.set_speed_ratio(ratio)
 		_fx.set_boost(boosting)
-	if boosting and not _was_boosting and _rig != null and _rig.has_method(&"add_shake"):
-		_rig.add_shake(shake_on_boost)
+	if boosting and not _was_boosting:
+		if _rig != null and _rig.has_method(&"add_shake"):
+			_rig.add_shake(shake_on_boost)
+		_audio_call(&"boost")
 	_was_boosting = boosting
 
 
@@ -212,6 +215,7 @@ func _on_ship_near_miss() -> void:
 	if _fx != null and enable_near_miss_flash:
 		_fx.flash(near_miss_flash_amount, Color(0.5, 0.9, 1.0))
 	_trigger_time_dilation()
+	_audio_call(&"near_miss")
 
 
 func _on_ship_crashed() -> void:
@@ -225,6 +229,7 @@ func _on_ship_crashed() -> void:
 		_fx.set_speed_ratio(0.0)                              # kill the speed lines / aberration
 		_fx.set_boost(false)
 	_reset_time_scale()                                       # the game-over screen runs at normal speed
+	_audio_call(&"crash")
 	if _game_over != null:
 		_game_over.show_over(ScoreManager.get_score(), ScoreManager.high_score, is_best)
 
@@ -257,6 +262,14 @@ func _reset_time_scale() -> void:
 	_td_timer = 0.0
 	_td_cooldown = 0.0
 	Engine.time_scale = 1.0
+
+
+## Fire an AudioManager method by name, if the autoload is present (audio is fully optional, so the
+## game runs fine without it). Used for the SFX hooks + starting the music bed.
+func _audio_call(method: StringName) -> void:
+	var am := get_node_or_null(^"/root/AudioManager")
+	if am != null and am.has_method(method):
+		am.call(method)
 
 
 ## Safe read from the Config autoload (falls back to the default if it isn't present).
