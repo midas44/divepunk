@@ -234,10 +234,10 @@ Ordered **by risk**: prove the fun before building content, prove it's a game be
 - [x] **Goal:** it's a real game with a score, a fail state, and the "one more go" loop. *(Desktop; headless-verified, pending playtest.)*
 
 ### M4 — Aesthetic pass
-- [ ] `WorldEnvironment`: glow, volumetric fog, dark sky; SSR on desktop.
-- [ ] Emissive neon building materials; obstacle telegraphing.
-- [ ] One music track + core SFX; deepen juice (near-miss flash/time-dilation, haptics).
-- [ ] **Goal:** it's *beautiful* and it *feels* fast.
+- [x] `WorldEnvironment`: glow, volumetric fog, dark sky; SSR on desktop. *(Procedural neon sky + horizon glow, ACES tonemap, additive multi-mip glow, exponential + volumetric fog, SSR mirrored in a wet-street ground; all gated by `settings.cfg [fx]`.)*
+- [x] Emissive neon building materials; obstacle telegraphing. *(World-space procedural neon-window building shader; a shared pulsing + fresnel-rim hazard shader for the amber obstacles & magenta traffic.)*
+- [x] One music track + core SFX; deepen juice (near-miss flash/time-dilation, haptics). *(All audio synthesised procedurally — a looping synth bed + near-miss/boost/crash SFX via the `AudioManager` autoload; plus screen flash, bounded time-dilation, boost punch, fullscreen speed lines, chromatic aberration. Haptics deferred to M5/Android.)*
+- [ ] **Goal:** it's *beautiful* and it *feels* fast. *(Implemented headless-clean; pending playtest.)*
 
 ### M5 — Android ship
 - [ ] Mobile renderer export preset; touch input scheme.
