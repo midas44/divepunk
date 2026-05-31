@@ -211,40 +211,111 @@ func _apply_camera_config(rig: Node3D) -> void:
 
 func _ensure_environment() -> void:
 	if get_node_or_null(^"Sun") == null:
+		# A dim, cool key light — just enough to model the towers; the city lights itself (emissive).
 		var sun := DirectionalLight3D.new()
 		sun.name = "Sun"
-		sun.rotation = Vector3(deg_to_rad(-50.0), deg_to_rad(40.0), 0.0)
-		sun.light_energy = 0.6
+		sun.rotation = Vector3(deg_to_rad(-55.0), deg_to_rad(35.0), 0.0)
+		sun.light_color = Color(0.55, 0.65, 1.0)
+		sun.light_energy = 0.35
 		add_child(sun)
 
 	if get_node_or_null(^"WorldEnvironment") == null:
 		var we := WorldEnvironment.new()
 		we.name = "WorldEnvironment"
-		var env := Environment.new()
-		env.background_mode = Environment.BG_COLOR
-		env.background_color = Color(0.02, 0.02, 0.06)         # near-black night
-		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-		env.ambient_light_color = Color(0.10, 0.10, 0.20)
-		env.ambient_light_energy = 0.5
-		env.glow_enabled = true                                # neon bloom (M4 tunes this)
-		env.fog_enabled = true                                 # depth + hides draw distance
-		env.fog_light_color = Color(0.05, 0.07, 0.15)
-		env.fog_density = 0.01
-		we.environment = env
+		we.environment = _build_environment()
 		add_child(we)
 
 	if get_node_or_null(^"RefGround") == null:
-		# A long dark ground plane so motion reads clearly against the city.
+		# A long, near-black WET street: low roughness + a little metal so SSR mirrors the neon
+		# skyline in it (spec §7.7, wet-street reflections). Reads as dark glass when SSR is off.
 		var ground := MeshInstance3D.new()
 		ground.name = "RefGround"
 		var plane := PlaneMesh.new()
 		plane.size = Vector2(4000.0, 44000.0)
 		ground.mesh = plane
 		var gm := StandardMaterial3D.new()
-		gm.albedo_color = Color(0.04, 0.05, 0.09)
+		gm.albedo_color = Color(0.012, 0.016, 0.03)
+		gm.metallic = 0.35
+		gm.metallic_specular = 0.6
+		gm.roughness = 0.22
 		ground.material_override = gm
 		ground.position = Vector3(0.0, 0.0, -20000.0)
 		add_child(ground)
+
+
+## Assembles the neon-night Environment (M4 aesthetic pass, spec §7.7). The heavier desktop
+## effects (volumetric fog, SSR, glow) are gated by settings.cfg [fx] so they can be dialled
+## back for performance; the tasteful defaults match the @export fallbacks here.
+func _build_environment() -> Environment:
+	var env := Environment.new()
+
+	# Dark night sky with a faint neon band along the horizon = distant city glow (spec §7.7).
+	var sky_mat := ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.01, 0.01, 0.03)
+	sky_mat.sky_horizon_color = Color(0.07, 0.03, 0.12)
+	sky_mat.sky_curve = 0.12
+	sky_mat.sky_energy_multiplier = 0.6
+	sky_mat.ground_bottom_color = Color(0.01, 0.01, 0.02)
+	sky_mat.ground_horizon_color = Color(0.06, 0.02, 0.10)
+	sky_mat.ground_energy_multiplier = 0.3
+	var sky := Sky.new()
+	sky.sky_material = sky_mat
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+
+	# Ambient + reflections come from the (dark) sky so matte surfaces stay moody and the neon pops.
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 0.25
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+
+	# ACES tonemap keeps neon saturation while taming HDR; a high white point keeps bright
+	# emissives COLOURED (so they bloom in colour) instead of clipping to white.
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = float(_cfg_value("fx", "exposure", 1.0))
+	env.tonemap_white = 6.0
+
+	# Glow / bloom — the neon halo. Additive reads as light; the HDR threshold keeps the bloom on
+	# the bright emissive strips, not the whole frame. Spread over several mips for a soft, wide halo.
+	env.glow_enabled = bool(_cfg_value("fx", "glow", true))
+	env.glow_intensity = float(_cfg_value("fx", "glow_intensity", 0.85))
+	env.glow_strength = 1.0
+	env.glow_bloom = float(_cfg_value("fx", "bloom", 0.12))
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+	env.glow_hdr_threshold = 0.95
+	env.glow_hdr_scale = 2.0
+	for lvl: int in [1, 2, 3, 4, 5]:
+		env.set("glow_levels/%d" % lvl, true)
+
+	# Exponential distance fog — depth cue + conveniently hides the chunk draw distance.
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.05, 0.06, 0.13)
+	env.fog_density = float(_cfg_value("fx", "fog_density", 0.01))
+	env.fog_sky_affect = 0.3
+	env.fog_aerial_perspective = 0.5
+
+	# Volumetric fog — the real mood layer (desktop): a faint neon-tinted haze with true depth.
+	env.volumetric_fog_enabled = bool(_cfg_value("fx", "volumetric_fog", true))
+	env.volumetric_fog_density = float(_cfg_value("fx", "volumetric_fog_density", 0.018))
+	env.volumetric_fog_albedo = Color(0.06, 0.07, 0.16)
+	env.volumetric_fog_emission = Color(0.05, 0.02, 0.10)
+	env.volumetric_fog_emission_energy = 0.4
+	env.volumetric_fog_length = 3200.0
+	env.volumetric_fog_gi_inject = 0.2
+
+	# Screen-space reflections — wet-street neon (Forward+ desktop); reflects in the RefGround.
+	env.ssr_enabled = bool(_cfg_value("fx", "ssr", true))
+	env.ssr_max_steps = 32
+	env.ssr_fade_in = 0.15
+	env.ssr_fade_out = 2.0
+	env.ssr_depth_tolerance = 0.2
+
+	# A touch more contrast + saturation in post to make the neon sing.
+	env.adjustment_enabled = true
+	env.adjustment_brightness = 1.0
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = float(_cfg_value("fx", "saturation", 1.22))
+
+	return env
 
 
 func _register_input() -> void:
