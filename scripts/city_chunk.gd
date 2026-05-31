@@ -2,8 +2,9 @@ class_name CityChunk
 extends Node3D
 ## One fixed-length segment of the city — DIVEPUNK, milestones M2–M3.
 ##
-## Buildings line both walls of the corridor (centre stays clear), rendered as a single
-## MultiMeshInstance3D so a whole chunk's towers cost ONE draw call.
+## Buildings line both walls of the corridor (centre stays clear). They're split across a few
+## MultiMeshInstance3D nodes — ONE per silhouette (box / round / hex / tapered) — so a whole chunk's
+## towers still cost only a handful of draw calls (one per shape in use) while the skyline stays varied.
 ##
 ## Obstacles (M3) are a small pool of StaticBody3D nodes placed IN the flyable corridor —
 ## these need real per-object collision (crash) and per-object near-miss detection, which
@@ -23,6 +24,10 @@ const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (see
 const BUILDING_SHADER := preload("res://shaders/building.gdshader")
 const HAZARD_SHADER := preload("res://shaders/hazard.gdshader")
 
+## Building size classes and silhouettes (tuned via the "Building classes" / "Building shapes" groups).
+enum {CLS_LOW, CLS_MID, CLS_HIGH, CLS_MEGA}
+enum {SHP_BOX, SHP_ROUND, SHP_PRISM, SHP_TAPER}   ## index order MUST match _get_building_meshes()
+
 @export_group("Chunk")
 @export var chunk_length: float = 200.0          ## metres along -Z (ChunkManager keeps this in sync)
 
@@ -34,15 +39,37 @@ const HAZARD_SHADER := preload("res://shaders/hazard.gdshader")
 @export_group("Buildings")
 @export var columns_per_side: int = 3            ## building rows stacked outward from the corridor
 @export var rows_per_chunk: int = 12             ## building slots along the chunk's length, per column
-@export var column_spacing: float = 26.0         ## X gap between building columns
-@export var min_footprint: float = 8.0
-@export var max_footprint: float = 20.0
-@export var min_height: float = 18.0
-@export var max_height: float = 130.0
+@export var column_spacing: float = 42.0         ## X gap between building columns (×world_scale); widened for the bigger footprints
 @export_range(0.0, 1.0) var fill_chance: float = 0.86   ## per-slot chance of a building (gaps add variety)
 @export_range(0.0, 1.0) var cell_depth_jitter: float = 0.35
 @export var world_scale: float = 1.0   ## set by ChunkManager; >1 enlarges buildings + spacing around the constant-size car (1.0 = original)
 @export var building_windows: bool = true   ## procedural neon-window shader (set by ChunkManager from [fx] building_windows); false = flat emissive boxes
+
+@export_group("Building classes")
+## Each slot draws a size CLASS by weight (weights are normalised, so they need not sum to 1). A skyline
+## of mostly LOW/MID with rare MEGA towers reads far more interesting than a uniform wall. Heights and
+## footprints are metres BEFORE [game] scale — the layout multiplies them by world_scale like the rest
+## of the city, so at scale 2.0 a mega tower is roughly twice these numbers tall.
+@export var low_weight: float = 0.42
+@export var mid_weight: float = 0.38
+@export var high_weight: float = 0.14
+@export var mega_weight: float = 0.06     ## rare; megatowers are also kept off the corridor-edge column
+@export var low_height: Vector2 = Vector2(30.0, 80.0)
+@export var mid_height: Vector2 = Vector2(80.0, 200.0)
+@export var high_height: Vector2 = Vector2(200.0, 420.0)
+@export var mega_height: Vector2 = Vector2(420.0, 880.0)
+@export var low_footprint: Vector2 = Vector2(14.0, 34.0)
+@export var mid_footprint: Vector2 = Vector2(12.0, 24.0)
+@export var high_footprint: Vector2 = Vector2(13.0, 26.0)
+@export var mega_footprint: Vector2 = Vector2(26.0, 52.0)
+
+@export_group("Building shapes")
+## Silhouette mix. Each non-empty shape is one extra MultiMesh per chunk (one draw call), so a 0 weight
+## costs nothing. BOX = rectangular, ROUND = cylinder, PRISM = hexagonal, TAPER = tapered/setback tower.
+@export var shape_box_weight: float = 0.5
+@export var shape_round_weight: float = 0.2
+@export var shape_prism_weight: float = 0.15
+@export var shape_taper_weight: float = 0.15
 
 @export_group("Obstacles")
 @export var safe_chunks: int = 2                 ## first N chunks have no obstacles (a warm-up runway)
@@ -54,27 +81,28 @@ const HAZARD_SHADER := preload("res://shaders/hazard.gdshader")
 @export var obstacle_max_size: Vector3 = Vector3(12.0, 44.0, 12.0)
 @export var hazard_pulse: bool = true   ## pulsing-emissive + fresnel telegraph shader (set by ChunkManager from [fx] hazard_pulse)
 
-## Shared across every chunk so we allocate one mesh + material, not one per chunk/instance.
-static var _building_mesh: BoxMesh
+## Shared across every chunk so we allocate the meshes + materials once, not one per chunk/instance.
+static var _building_meshes: Array[Mesh] = []   ## one unit mesh per SHP_* silhouette, all sharing _building_mat
+static var _building_mat: ShaderMaterial
 static var _obstacle_mesh: BoxMesh
 static var _obstacle_mat: ShaderMaterial
 
 var index: int = 0
-var _mm: MultiMesh
-var _mmi: MultiMeshInstance3D
+var _mms: Array[MultiMesh] = []                  ## one per silhouette (SHP_*), index-aligned with _mmis
+var _mmis: Array[MultiMeshInstance3D] = []
 var _obstacles: Array[StaticBody3D] = []
 
 
 func _ready() -> void:
-	_ensure_multimesh()
+	_ensure_multimeshes()
 	_ensure_obstacles()
 
 
 ## Deterministically (re)builds this chunk's buildings + obstacles for a given chunk index.
 func generate(p_index: int, base_seed: int, difficulty: float) -> void:
 	index = p_index
-	if _mm == null:
-		_ensure_multimesh()
+	if _mms.is_empty():
+		_ensure_multimeshes()
 	if _obstacles.is_empty():
 		_ensure_obstacles()
 	var diff: float = clampf(difficulty, 0.0, 1.0)
@@ -83,24 +111,44 @@ func generate(p_index: int, base_seed: int, difficulty: float) -> void:
 
 
 func _generate_buildings(base_seed: int, p_index: int, diff: float) -> void:
-	# Compute the layout (pure, testable), then upload it to the MultiMesh.
+	# Compute the layout (pure, testable), then split it across one MultiMesh per silhouette and upload.
 	var layout := compute_building_layout(base_seed, p_index, diff)
 	var transforms: Array[Transform3D] = layout["transforms"]
 	var colors: PackedColorArray = layout["colors"]
-	_mm.instance_count = transforms.size()
+	var shapes: PackedInt32Array = layout["shapes"]
+
+	# Bucket each instance under its silhouette (plain Arrays — safe to mutate by index).
+	var bucket_t: Array = []
+	var bucket_c: Array = []
+	for k: int in _mms.size():
+		bucket_t.append([])
+		bucket_c.append([])
 	for i: int in transforms.size():
-		_mm.set_instance_transform(i, transforms[i])
-		_mm.set_instance_color(i, colors[i])
+		var k: int = clampi(shapes[i], 0, _mms.size() - 1)
+		bucket_t[k].append(transforms[i])
+		bucket_c[k].append(colors[i])
+
+	for k: int in _mms.size():
+		var ts: Array = bucket_t[k]
+		var cs: Array = bucket_c[k]
+		var mm: MultiMesh = _mms[k]
+		mm.instance_count = ts.size()
+		for i: int in ts.size():
+			mm.set_instance_transform(i, ts[i])
+			mm.set_instance_color(i, cs[i])
+		_mmis[k].visible = ts.size() > 0
 
 
-## Deterministically computes this chunk's building transforms + colors (no rendering side effects,
-## so it's unit-testable headless where MultiMesh readback isn't). Returns {transforms, colors}.
+## Deterministically computes this chunk's building transforms, colors and silhouettes (no rendering
+## side effects, so it's unit-testable headless where MultiMesh readback isn't). Returns
+## {transforms, colors, shapes}, where shapes[i] is one of SHP_*.
 ##
-## world_scale enlarges the whole city around the (constant-size) car: bigger footprints and
-## heights, with row/column spacing widened to match so the building:gap ratio stays put. Fewer,
-## larger rows per chunk keep that ratio identical, so world_scale = 1.0 reproduces the original
-## city exactly. corridor_half_width is deliberately NOT scaled, so the towers loom at the same
-## distance (that's what makes them read as bigger relative to the car, instead of just receding).
+## world_scale enlarges the whole city around the (constant-size) car: bigger footprints and heights,
+## with row/column spacing widened to match so the building:gap ratio stays put. Each slot rolls a size
+## CLASS (mostly low/mid, rare megatowers) and a SILHOUETTE, so the skyline varies in both height and
+## shape. corridor_half_width is deliberately NOT scaled, so the towers loom at the same distance (that's
+## what makes them read as bigger relative to the car, instead of just receding); megatowers are kept
+## off the innermost column so their wide bases never intrude on the flyable corridor.
 func compute_building_layout(base_seed: int, p_index: int, diff: float) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = _mix_seed(base_seed, p_index, 0)
@@ -110,6 +158,10 @@ func compute_building_layout(base_seed: int, p_index: int, diff: float) -> Dicti
 
 	var transforms: Array[Transform3D] = []
 	var colors := PackedColorArray()
+	var shapes := PackedInt32Array()
+
+	var class_total: float = maxf(low_weight, 0.0) + maxf(mid_weight, 0.0) + maxf(high_weight, 0.0) + maxf(mega_weight, 0.0)
+	var shape_total: float = maxf(shape_box_weight, 0.0) + maxf(shape_round_weight, 0.0) + maxf(shape_prism_weight, 0.0) + maxf(shape_taper_weight, 0.0)
 
 	for side: float in [-1.0, 1.0]:
 		for col: int in columns_per_side:
@@ -117,9 +169,12 @@ func compute_building_layout(base_seed: int, p_index: int, diff: float) -> Dicti
 			for row: int in eff_rows:
 				if rng.randf() > fill_chance:
 					continue   # leave a gap
-				var fx: float = rng.randf_range(min_footprint, max_footprint) * scale
-				var fz: float = rng.randf_range(min_footprint, max_footprint) * scale
-				var height: float = rng.randf_range(min_height, max_height)
+				var cls: int = _pick_class(rng, class_total, col)
+				var h_range: Vector2 = _class_height(cls)
+				var f_range: Vector2 = _class_footprint(cls)
+				var fx: float = rng.randf_range(f_range.x, f_range.y) * scale
+				var fz: float = rng.randf_range(f_range.x, f_range.y) * scale
+				var height: float = rng.randf_range(h_range.x, h_range.y)
 				height *= 0.65 + 0.35 * diff        # taller as difficulty ramps
 				height *= 1.0 + 0.12 * float(col)    # outer columns a touch taller
 				height *= scale                      # ...and overall bigger with world_scale
@@ -127,11 +182,62 @@ func compute_building_layout(base_seed: int, p_index: int, diff: float) -> Dicti
 				var z: float = -(float(row) + 0.5) * row_spacing \
 					+ rng.randf_range(-row_spacing, row_spacing) * cell_depth_jitter
 				var yaw: float = rng.randf_range(-0.12, 0.12)
+				var shape: int = _pick_shape(rng, shape_total)
 				var basis := Basis(Vector3.UP, yaw).scaled(Vector3(fx, height, fz))
 				transforms.append(Transform3D(basis, Vector3(x, height * 0.5, z)))
 				colors.append(Color.from_hsv(rng.randf(), 0.22, rng.randf_range(0.12, 0.30)))
+				shapes.append(shape)
 
-	return {"transforms": transforms, "colors": colors}
+	return {"transforms": transforms, "colors": colors, "shapes": shapes}
+
+
+## Weighted pick of a size class. Megatowers are demoted to high-rise on the innermost column (col 0)
+## so their wide footprints never reach into the flyable corridor.
+func _pick_class(rng: RandomNumberGenerator, total: float, col: int) -> int:
+	var r: float = rng.randf() * maxf(total, 0.0001)
+	var a: float = maxf(low_weight, 0.0)
+	var b: float = a + maxf(mid_weight, 0.0)
+	var c: float = b + maxf(high_weight, 0.0)
+	var cls: int = CLS_MEGA
+	if r < a:
+		cls = CLS_LOW
+	elif r < b:
+		cls = CLS_MID
+	elif r < c:
+		cls = CLS_HIGH
+	if col == 0 and cls == CLS_MEGA:
+		cls = CLS_HIGH
+	return cls
+
+
+func _class_height(cls: int) -> Vector2:
+	match cls:
+		CLS_LOW:  return low_height
+		CLS_MID:  return mid_height
+		CLS_HIGH: return high_height
+		_:        return mega_height
+
+
+func _class_footprint(cls: int) -> Vector2:
+	match cls:
+		CLS_LOW:  return low_footprint
+		CLS_MID:  return mid_footprint
+		CLS_HIGH: return high_footprint
+		_:        return mega_footprint
+
+
+func _pick_shape(rng: RandomNumberGenerator, total: float) -> int:
+	var r: float = rng.randf() * maxf(total, 0.0001)
+	var a: float = maxf(shape_box_weight, 0.0)
+	var b: float = a + maxf(shape_round_weight, 0.0)
+	var c: float = b + maxf(shape_prism_weight, 0.0)
+	if r < a:
+		return SHP_BOX
+	elif r < b:
+		return SHP_ROUND
+	elif r < c:
+		return SHP_PRISM
+	return SHP_TAPER
 
 
 func _generate_obstacles(base_seed: int, p_index: int, diff: float) -> void:
@@ -174,17 +280,23 @@ func _generate_obstacles(base_seed: int, p_index: int, diff: float) -> void:
 		ob.visible = true
 
 
-func _ensure_multimesh() -> void:
-	_mmi = get_node_or_null(^"Buildings") as MultiMeshInstance3D
-	if _mmi == null:
-		_mmi = MultiMeshInstance3D.new()
-		_mmi.name = "Buildings"
-		add_child(_mmi)
-	_mm = MultiMesh.new()
-	_mm.transform_format = MultiMesh.TRANSFORM_3D
-	_mm.use_colors = true                   # must be set before instance_count; feeds the shader's COLOR
-	_mm.mesh = _get_building_mesh(building_windows, world_scale)
-	_mmi.multimesh = _mm
+func _ensure_multimeshes() -> void:
+	var meshes := _get_building_meshes(building_windows, world_scale)
+	if _mmis.is_empty():
+		for k: int in meshes.size():
+			var mmi := MultiMeshInstance3D.new()
+			mmi.name = "Buildings%d" % k
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_colors = true                 # must be set before instance_count; feeds the shader's COLOR
+			mm.mesh = meshes[k]
+			mmi.multimesh = mm
+			add_child(mmi)
+			_mmis.append(mmi)
+			_mms.append(mm)
+	else:
+		for k: int in _mms.size():
+			_mms[k].mesh = meshes[k]
 
 
 func _ensure_obstacles() -> void:
@@ -226,26 +338,50 @@ func _mix_seed(base_seed: int, idx: int, salt: int) -> int:
 	return h
 
 
-## One shared unit-cube mesh + neon-window ShaderMaterial for all building instances (M4). The
-## MultiMesh feeds the per-building hue through COLOR; the shader turns it into lit windows. Cached
-## statically, so `windows` is resolved once (it's a global [fx] toggle — every chunk passes the
-## same value). windows = false leaves a flat dim emissive body.
-static func _get_building_mesh(windows: bool, p_world_scale: float) -> BoxMesh:
-	if _building_mesh == null:
-		var mesh := BoxMesh.new()
-		mesh.size = Vector3.ONE
-		var mat := ShaderMaterial.new()
-		mat.shader = BUILDING_SHADER
-		mesh.material = mat
-		_building_mesh = mesh
-	# Re-applied every call (mesh + material are shared/cached). The window panes are a WORLD-space
-	# grid, so multiply the base pane size by world_scale to keep windows proportional to the
-	# enlarged towers instead of staying a constant 4x5 m (tiny once [game] scale grows the city).
-	var m := _building_mesh.material as ShaderMaterial
-	m.set_shader_parameter("windows_on", 1.0 if windows else 0.0)
-	m.set_shader_parameter("window_size_v", 4.0 * p_world_scale)
-	m.set_shader_parameter("window_size_h", 5.0 * p_world_scale)
-	return _building_mesh
+## One shared neon-window ShaderMaterial + one UNIT mesh per silhouette (SHP_*), for all building
+## instances (M4). The MultiMesh feeds the per-building hue through COLOR; the shader turns it into lit
+## windows laid out in WORLD space, so the pane size is multiplied by world_scale to stay proportional
+## to the enlarged towers (a constant 4×5 m grid looks tiny once [game] scale grows the city). Every
+## mesh fits a 1×1×1 box, so the per-instance basis scale (fx, height, fz) sets the real dimensions —
+## the cylinder variants give the round / hex / tapered towers. Cached statically; `windows` is a global
+## [fx] toggle so every chunk passes the same value.
+static func _get_building_meshes(windows: bool, p_world_scale: float) -> Array[Mesh]:
+	if _building_mat == null:
+		_building_mat = ShaderMaterial.new()
+		_building_mat.shader = BUILDING_SHADER
+	_building_mat.set_shader_parameter("windows_on", 1.0 if windows else 0.0)
+	_building_mat.set_shader_parameter("window_size_v", 4.0 * p_world_scale)
+	_building_mat.set_shader_parameter("window_size_h", 5.0 * p_world_scale)
+	if _building_meshes.is_empty():
+		# Index order MUST match the SHP_* enum (BOX, ROUND, PRISM, TAPER).
+		var box := BoxMesh.new()
+		box.size = Vector3.ONE
+		box.material = _building_mat
+
+		var round_tower := CylinderMesh.new()
+		round_tower.height = 1.0
+		round_tower.top_radius = 0.5
+		round_tower.bottom_radius = 0.5
+		round_tower.radial_segments = 20
+		round_tower.material = _building_mat
+
+		var prism := CylinderMesh.new()
+		prism.height = 1.0
+		prism.top_radius = 0.5
+		prism.bottom_radius = 0.5
+		prism.radial_segments = 6
+		prism.material = _building_mat
+
+		var taper := CylinderMesh.new()
+		taper.height = 1.0
+		taper.top_radius = 0.28
+		taper.bottom_radius = 0.5
+		taper.radial_segments = 20
+		taper.material = _building_mat
+
+		var meshes: Array[Mesh] = [box, round_tower, prism, taper]
+		_building_meshes = meshes
+	return _building_meshes
 
 
 static func _get_obstacle_mesh() -> BoxMesh:
