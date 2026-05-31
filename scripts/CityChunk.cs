@@ -26,6 +26,7 @@ public partial class CityChunk : Node3D
 	// M4 neon look — procedural shaders shared by every chunk (see shaders/).
 	private static readonly Shader BuildingShader = GD.Load<Shader>("res://shaders/building.gdshader");
 	private static readonly Shader HazardShader = GD.Load<Shader>("res://shaders/hazard.gdshader");
+	private static readonly Shader BeaconShader = GD.Load<Shader>("res://shaders/beacon.gdshader");
 
 	// Building size classes and silhouettes (tuned via the "Building classes" / "Building shapes" groups).
 	private enum BuildingClass { Low = 0, Mid = 1, High = 2, Mega = 3 }
@@ -51,6 +52,7 @@ public partial class CityChunk : Node3D
 	[Export(PropertyHint.Range, "0,1")] public float CellDepthJitter = 0.35f;
 	[Export] public float WorldScale = 1.0f;             // set by ChunkManager; >1 enlarges buildings + spacing
 	[Export] public bool BuildingWindows = true;         // procedural neon-window shader; false = flat emissive boxes
+	[Export(PropertyHint.Range, "0,1")] public float SkybridgeChance = 0.35f;  // chance an adjacent same-side tower pair is linked by a skybridge
 
 	[ExportGroup("Building classes")]
 	[Export] public float LowWeight = 0.50f;
@@ -89,11 +91,26 @@ public partial class CityChunk : Node3D
 	private static ShaderMaterial _buildingMat;
 	private static BoxMesh _obstacleMesh;
 	private static ShaderMaterial _obstacleMat;
+	private static CylinderMesh _antennaMesh;            // one shared tapered mast, scaled per roof
+	private static StandardMaterial3D _antennaMat;       // dark metal
+	private static SphereMesh _beaconMesh;               // one shared red light, scaled per roof
+	private static ShaderMaterial _beaconMat;            // blinking emissive (beacon.gdshader)
+	private static CylinderMesh _spireMesh;              // pointed roof cap (cone), scaled per roof
+	private static SphereMesh _domeMesh;                 // dome roof cap, scaled per roof
+	private static StandardMaterial3D _structureMat;     // dark concrete/metal for rooftop caps
 
 	public int Index = 0;
 	private List<MultiMesh> _mms = new();                // one per silhouette, index-aligned with _mmis
 	private List<MultiMeshInstance3D> _mmis = new();
 	private List<StaticBody3D> _obstacles = new();
+	private MultiMesh _antennaMm;                         // rooftop masts for the whole chunk (one draw call)
+	private MultiMeshInstance3D _antennaMmi;
+	private MultiMesh _beaconMm;                          // rooftop red beacons for the whole chunk (one draw call)
+	private MultiMeshInstance3D _beaconMmi;
+	private MultiMesh _spireMm;                           // rooftop spires/cones for the whole chunk
+	private MultiMeshInstance3D _spireMmi;
+	private MultiMesh _domeMm;                            // rooftop domes for the whole chunk
+	private MultiMeshInstance3D _domeMmi;
 
 	public override void _Ready()
 	{
@@ -117,42 +134,65 @@ public partial class CityChunk : Node3D
 	private void GenerateBuildings(long baseSeed, int pIndex, float diff)
 	{
 		// Compute the layout (pure, testable), then split it across one MultiMesh per silhouette and upload.
-		var (transforms, colors, shapes) = ComputeBuildingLayout(baseSeed, pIndex, diff);
+		BuildingLayout layout = ComputeBuildingLayout(baseSeed, pIndex, diff);
 
-		// Bucket each instance under its silhouette.
+		// Bucket each instance under its silhouette (transform + window colour + lighting-profile custom data).
 		var bucketT = new List<List<Transform3D>>();
 		var bucketC = new List<List<Color>>();
+		var bucketX = new List<List<Color>>();
 		for (int k = 0; k < _mms.Count; k++)
 		{
 			bucketT.Add(new List<Transform3D>());
 			bucketC.Add(new List<Color>());
+			bucketX.Add(new List<Color>());
 		}
-		for (int i = 0; i < transforms.Count; i++)
+		for (int i = 0; i < layout.Transforms.Count; i++)
 		{
-			int k = Mathf.Clamp(shapes[i], 0, _mms.Count - 1);
-			bucketT[k].Add(transforms[i]);
-			bucketC[k].Add(colors[i]);
+			int k = Mathf.Clamp(layout.Shapes[i], 0, _mms.Count - 1);
+			bucketT[k].Add(layout.Transforms[i]);
+			bucketC[k].Add(layout.Colors[i]);
+			bucketX[k].Add(layout.Custom[i]);
 		}
 
 		for (int k = 0; k < _mms.Count; k++)
 		{
 			List<Transform3D> ts = bucketT[k];
 			List<Color> cs = bucketC[k];
+			List<Color> xs = bucketX[k];
 			MultiMesh mm = _mms[k];
 			mm.InstanceCount = ts.Count;
 			for (int i = 0; i < ts.Count; i++)
 			{
 				mm.SetInstanceTransform(i, ts[i]);
-				mm.SetInstanceColor(i, cs[i]);
+				mm.SetInstanceColor(i, cs[i]);          // rgb = window colour, a = lit fraction
+				mm.SetInstanceCustomData(i, xs[i]);     // variation, grid class, accent hue, accent amount
 			}
 			_mmis[k].Visible = ts.Count > 0;
 		}
+
+		// Rooftop features ride their own per-chunk MultiMeshes (one draw call each).
+		UploadTransforms(_beaconMm, _beaconMmi, layout.Beacons);
+		UploadTransforms(_antennaMm, _antennaMmi, layout.Antennas);
+		UploadTransforms(_spireMm, _spireMmi, layout.Spires);
+		UploadTransforms(_domeMm, _domeMmi, layout.Domes);
 	}
 
-	// Deterministically computes this chunk's building transforms, colors and silhouettes (no rendering
-	// side effects, so it's unit-testable headless where MultiMesh readback isn't). Returns
-	// (transforms, colors, shapes), where shapes[i] is one of the Silhouette values.
-	public (List<Transform3D> transforms, List<Color> colors, List<int> shapes) ComputeBuildingLayout(long baseSeed, int pIndex, float diff)
+	// Pushes a flat list of transforms into a MultiMesh and toggles its instance visible/empty.
+	private static void UploadTransforms(MultiMesh mm, MultiMeshInstance3D mmi, List<Transform3D> xforms)
+	{
+		mm.InstanceCount = xforms.Count;
+		for (int i = 0; i < xforms.Count; i++)
+			mm.SetInstanceTransform(i, xforms[i]);
+		mmi.Visible = xforms.Count > 0;
+	}
+
+	// Deterministically computes this chunk's buildings (no rendering side effects, so it's unit-testable
+	// headless where MultiMesh readback isn't). Per kept building the RNG stream consumes, in order:
+	// class, footprint (base + 2 aspects), height, yaw, x-jitter, z-jitter, shape, window profile
+	// (accent hue + archetype + traits), then the roof-feature draws (mast/beacon/cap, see
+	// AddRoofFeatures); a final pass links some adjacent towers with skybridges. The builders salt (0)
+	// keeps this independent of the obstacle stream (1), so tuning one never reshuffles the other.
+	public BuildingLayout ComputeBuildingLayout(long baseSeed, int pIndex, float diff)
 	{
 		var rng = new RandomNumberGenerator();
 		rng.Seed = (ulong)MixSeed(baseSeed, pIndex, 0);
@@ -160,9 +200,21 @@ public partial class CityChunk : Node3D
 		int effRows = Mathf.Max(1, RoundHalfAway((float)RowsPerChunk / scale));
 		float rowSpacing = ChunkLength / (float)effRows;
 
-		var transforms = new List<Transform3D>();
-		var colors = new List<Color>();
-		var shapes = new List<int>();
+		var layout = new BuildingLayout
+		{
+			Transforms = new List<Transform3D>(),
+			Colors = new List<Color>(),
+			Custom = new List<Color>(),
+			Shapes = new List<int>(),
+			Antennas = new List<Transform3D>(),
+			Beacons = new List<Transform3D>(),
+			Spires = new List<Transform3D>(),
+			Domes = new List<Transform3D>(),
+		};
+
+		// Track placed towers (by side/column/row) so the skybridge pass below can link neighbours.
+		var placed = new List<PlacedBuilding>();
+		var lookup = new Dictionary<(int, int, int), PlacedBuilding>();
 
 		float classTotal = Mathf.Max(LowWeight, 0.0f) + Mathf.Max(MidWeight, 0.0f) + Mathf.Max(HighWeight, 0.0f) + Mathf.Max(MegaWeight, 0.0f);
 		float shapeTotal = Mathf.Max(ShapeBoxWeight, 0.0f) + Mathf.Max(ShapeRoundWeight, 0.0f) + Mathf.Max(ShapePrismWeight, 0.0f) + Mathf.Max(ShapeTaperWeight, 0.0f);
@@ -199,14 +251,31 @@ public partial class CityChunk : Node3D
 						+ rng.RandfRange(-rowSpacing, rowSpacing) * CellDepthJitter;
 					Silhouette shape = PickShape(rng, shapeTotal);
 					Basis basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx, height, fz));
-					transforms.Add(new Transform3D(basis, new Vector3(x, height * 0.5f, z)));
-					colors.Add(Color.FromHsv(rng.Randf(), 0.22f, rng.RandfRange(0.12f, 0.30f)));
-					shapes.Add((int)shape);
+					layout.Transforms.Add(new Transform3D(basis, new Vector3(x, height * 0.5f, z)));
+					layout.Shapes.Add((int)shape);
+
+					// Per-building window lighting profile. COLOR carries the white base + lit fraction;
+					// INSTANCE_CUSTOM carries (variation, grid class, accent hue, accent amount). The shader
+					// derives its own per-building decorrelation seed from the instance origin.
+					WindowProfile wp = PickWindowProfile(rng);
+					layout.Colors.Add(new Color(wp.Color.R, wp.Color.G, wp.Color.B, wp.LitFraction));
+					layout.Custom.Add(new Color(wp.Variation, wp.GridClass, wp.AccentHue, wp.AccentAmount));
+
+					// Rooftop dressing: mast + beacon on the tallest, and a non-flat cap (setback / spire /
+					// dome) on some roofs.
+					AddRoofFeatures(rng, layout, cls, x, z, height, fx, fz, yaw, scale);
+
+					var pb = new PlacedBuilding { Side = side, Col = col, Row = row, X = x, Z = z, Top = height, HalfX = halfX };
+					placed.Add(pb);
+					lookup[(SideIdx(side), col, row)] = pb;
 				}
 			}
 		}
 
-		return (transforms, colors, shapes);
+		// Skybridge pass — link some adjacent same-side towers (deterministic, continues the same stream).
+		BridgeBuildings(rng, layout, lookup, placed, scale);
+
+		return layout;
 	}
 
 	// Weighted pick of a size class. Megatowers are demoted to high-rise on the innermost column (col 0)
@@ -258,6 +327,262 @@ public partial class CityChunk : Node3D
 		if (r < c)
 			return Silhouette.Prism;
 		return Silhouette.Taper;
+	}
+
+	// Window light palette. Most windows are WHITE — cold (offices) through warm (homes) — with a
+	// minority recoloured to a saturated neon accent. The cold/warm whites are full RGB; the accents are
+	// hues (0..1) the shader rebuilds at full saturation.
+	private static readonly Color WinColdWhite = new Color(0.72f, 0.80f, 1.00f);
+	private static readonly Color WinCyan      = new Color(0.45f, 0.85f, 1.00f);
+	private static readonly Color WinNeutral   = new Color(0.92f, 0.93f, 0.97f);
+	private static readonly Color WinWarmWhite = new Color(1.00f, 0.86f, 0.62f);
+	private static readonly Color WinAmber     = new Color(1.00f, 0.64f, 0.32f);
+	private static readonly float[] AccentHues =
+	{
+		0.00f,   // red
+		0.06f,   // amber-orange
+		0.33f,   // acid green
+		0.50f,   // cyan
+		0.58f,   // electric blue
+		0.74f,   // violet
+		0.85f,   // magenta
+		0.92f,   // hot pink
+	};
+
+	// One building's window "character", fed to the shader via COLOR (white base + lit fraction) and
+	// INSTANCE_CUSTOM (variation, grid class, accent hue, accent amount). `Variation` is the smart bit:
+	// low = a uniform block (windows match), high = residential (brightness/warmth differ, many dim).
+	// `AccentAmount` is the fraction of windows recoloured to `AccentHue` — usually a small scatter of
+	// colour among the white, occasionally near 1.0 for a deliberately fully-toned tower. `GridClass`
+	// picks the pane size/shape preset.
+	private struct WindowProfile
+	{
+		public Color Color;         // white base
+		public float LitFraction;
+		public float Variation;
+		public float GridClass;
+		public float AccentHue;     // 0..1
+		public float AccentAmount;  // 0..1 fraction of windows recoloured
+	}
+
+	// Everything Generate needs to draw a chunk's buildings + roof dressing, kept separate from the
+	// rendering so it stays pure/testable. Colors[i] is rgb=white window base, a=lit fraction; Custom[i]
+	// is (variation, grid class, accent hue, accent amount); Shapes[i] is a Silhouette.
+	public struct BuildingLayout
+	{
+		public List<Transform3D> Transforms;
+		public List<Color> Colors;
+		public List<Color> Custom;
+		public List<int> Shapes;
+		public List<Transform3D> Antennas;
+		public List<Transform3D> Beacons;
+		public List<Transform3D> Spires;
+		public List<Transform3D> Domes;
+	}
+
+	// Picks a window archetype, then rolls its traits. Lit fractions are deliberately LOW (most windows
+	// stay dark) and the colour mostly stays white — only the colourful/toned archetypes push real accent.
+	private WindowProfile PickWindowProfile(RandomNumberGenerator rng)
+	{
+		var p = new WindowProfile();
+		p.AccentHue = PickAccentHue(rng);   // every building carries a hue; AccentAmount decides if it shows
+		float a = rng.Randf();
+		if (a < 0.32f)
+		{
+			// OFFICE — cold/cyan white, near-uniform, sparse lit, dense small panes; essentially no colour.
+			p.Color = WinColdWhite.Lerp(WinCyan, rng.Randf() * 0.5f);
+			p.LitFraction = rng.RandfRange(0.10f, 0.24f);
+			p.Variation = rng.RandfRange(0.05f, 0.22f);
+			p.GridClass = rng.RandfRange(0.00f, 0.34f);
+			p.AccentAmount = rng.RandfRange(0.00f, 0.04f);
+		}
+		else if (a < 0.66f)
+		{
+			// RESIDENTIAL — warm/amber, highly varied (many dim windows), medium grid, the odd colour pop.
+			p.Color = WinWarmWhite.Lerp(WinAmber, rng.Randf());
+			p.LitFraction = rng.RandfRange(0.07f, 0.17f);
+			p.Variation = rng.RandfRange(0.60f, 1.00f);
+			p.GridClass = rng.RandfRange(0.20f, 0.80f);
+			p.AccentAmount = rng.RandfRange(0.00f, 0.10f);
+		}
+		else if (a < 0.84f)
+		{
+			// MIXED / commercial — neutral white, moderate, a modest scatter of coloured tenant windows.
+			p.Color = WinNeutral.Lerp(WinWarmWhite, rng.Randf() * 0.5f);
+			p.LitFraction = rng.RandfRange(0.10f, 0.22f);
+			p.Variation = rng.RandfRange(0.35f, 0.70f);
+			p.GridClass = rng.RandfRange(0.40f, 1.00f);
+			p.AccentAmount = rng.RandfRange(0.06f, 0.22f);
+		}
+		else if (a < 0.93f)
+		{
+			// COLOURFUL — a white tower with a pronounced MINORITY of saturated neon windows among the white.
+			p.Color = (rng.Randf() < 0.5f ? WinColdWhite : WinNeutral).Lerp(WinWarmWhite, rng.Randf() * 0.4f);
+			p.LitFraction = rng.RandfRange(0.10f, 0.22f);
+			p.Variation = rng.RandfRange(0.30f, 0.70f);
+			p.GridClass = rng.RandfRange(0.20f, 1.00f);
+			p.AccentAmount = rng.RandfRange(0.16f, 0.34f);
+		}
+		else
+		{
+			// TONED — the deliberate stylised case: (almost) ALL windows one saturated neon colour, kept
+			// coherent (low variation). Rare, so it punctuates the skyline instead of dominating it.
+			p.Color = WinNeutral;
+			p.LitFraction = rng.RandfRange(0.12f, 0.28f);
+			p.Variation = rng.RandfRange(0.08f, 0.30f);
+			p.GridClass = rng.RandfRange(0.00f, 1.00f);
+			p.AccentAmount = rng.RandfRange(0.85f, 1.00f);
+		}
+		return p;
+	}
+
+	// A saturated neon hue from the palette with a touch of jitter so two same-hue towers differ slightly.
+	private static float PickAccentHue(RandomNumberGenerator rng)
+	{
+		float h = AccentHues[(int)(rng.Randf() * AccentHues.Length) % AccentHues.Length];
+		return Mathf.Clamp(h + rng.RandfRange(-0.02f, 0.02f), 0.0f, 1.0f);
+	}
+
+	// Adds this building's rooftop dressing to the layout: a thin tapered mast (more likely the taller the
+	// tower), a red aviation beacon on the highest roofs, and — on some roofs — a non-flat cap: a setback
+	// penthouse (a smaller lit box, rides the building MultiMesh), a spire/cone, or a dome. Sizes scale
+	// with WorldScale so they stay proportional to the enlarged towers.
+	private void AddRoofFeatures(RandomNumberGenerator rng, BuildingLayout layout, BuildingClass cls, float x, float z, float height, float fx, float fz, float yaw, float scale)
+	{
+		float antennaChance = cls switch
+		{
+			BuildingClass.Low => 0.08f,
+			BuildingClass.Mid => 0.30f,
+			BuildingClass.High => 0.58f,
+			_ => 0.85f,
+		};
+		float roofTopY = height;   // where the beacon sits when there's no mast
+		if (rng.Randf() < antennaChance)
+		{
+			float antH = Mathf.Clamp(height * rng.RandfRange(0.10f, 0.22f), 12.0f * scale, 170.0f * scale);
+			float antRadius = rng.RandfRange(0.7f, 1.2f) * scale;
+			Basis ab = Basis.Identity.Scaled(new Vector3(antRadius * 2.0f, antH, antRadius * 2.0f));
+			layout.Antennas.Add(new Transform3D(ab, new Vector3(x, height + antH * 0.5f, z)));
+			roofTopY = height + antH;
+		}
+
+		float rBeacon = rng.Randf();
+		bool beacon = cls == BuildingClass.Mega || (cls == BuildingClass.High && rBeacon < 0.7f);
+		if (beacon)
+		{
+			float bR = rng.RandfRange(1.5f, 2.4f) * scale;
+			Basis bb = Basis.Identity.Scaled(new Vector3(bR * 2.0f, bR * 2.0f, bR * 2.0f));
+			layout.Beacons.Add(new Transform3D(bb, new Vector3(x, roofTopY + bR, z)));
+		}
+
+		// Non-flat roof cap — most roofs stay flat (~58%); the rest get a setback, spire, or dome.
+		float rCap = rng.Randf();
+		if (rCap < 0.22f)
+		{
+			// SETBACK penthouse — a smaller lit box stepped in from the roof edge (rides the building MMI).
+			float frac = rng.RandfRange(0.40f, 0.70f);
+			float capH = Mathf.Clamp(height * rng.RandfRange(0.04f, 0.12f), 6.0f * scale, 90.0f * scale);
+			Basis cb = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx * frac, capH, fz * frac));
+			AddBoxInstance(layout, new Transform3D(cb, new Vector3(x, height + capH * 0.5f, z)), PenthouseProfile(rng));
+		}
+		else if (rCap < 0.33f)
+		{
+			// SPIRE / cone.
+			float spireH = Mathf.Clamp(height * rng.RandfRange(0.12f, 0.34f), 10.0f * scale, 260.0f * scale);
+			float baseDiam = Mathf.Min(fx, fz) * rng.RandfRange(0.30f, 0.60f);
+			Basis sb = Basis.Identity.Scaled(new Vector3(baseDiam, spireH, baseDiam));
+			layout.Spires.Add(new Transform3D(sb, new Vector3(x, height + spireH * 0.5f, z)));
+		}
+		else if (rCap < 0.42f)
+		{
+			// DOME — sphere centred at the roofline so only the top half shows.
+			float domeDiam = Mathf.Min(fx, fz) * rng.RandfRange(0.50f, 0.92f);
+			float domeH = domeDiam * rng.RandfRange(0.45f, 0.80f);
+			Basis db = Basis.Identity.Scaled(new Vector3(domeDiam, domeH, domeDiam));
+			layout.Domes.Add(new Transform3D(db, new Vector3(x, height, z)));
+		}
+	}
+
+	// Appends an extra Box-silhouette instance (skybridge, rooftop penthouse) so it rides the building
+	// MultiMesh and is lit by the same window shader — no separate draw call or material.
+	private static void AddBoxInstance(BuildingLayout layout, Transform3D xform, WindowProfile wp)
+	{
+		layout.Transforms.Add(xform);
+		layout.Shapes.Add((int)Silhouette.Box);
+		layout.Colors.Add(new Color(wp.Color.R, wp.Color.G, wp.Color.B, wp.LitFraction));
+		layout.Custom.Add(new Color(wp.Variation, wp.GridClass, wp.AccentHue, wp.AccentAmount));
+	}
+
+	// A dim, mostly-dark mechanical-penthouse window profile (few lit windows, almost no colour).
+	private static WindowProfile PenthouseProfile(RandomNumberGenerator rng)
+	{
+		var p = new WindowProfile();
+		p.Color = WinNeutral;
+		p.LitFraction = rng.RandfRange(0.06f, 0.18f);
+		p.Variation = rng.RandfRange(0.10f, 0.40f);
+		p.GridClass = rng.RandfRange(0.00f, 0.50f);
+		p.AccentHue = PickAccentHue(rng);
+		p.AccentAmount = rng.RandfRange(0.00f, 0.06f);
+		return p;
+	}
+
+	// A dim skybridge window profile — a softly-lit connecting tube, occasional colour pop.
+	private static WindowProfile BridgeProfile(RandomNumberGenerator rng)
+	{
+		var p = new WindowProfile();
+		p.Color = WinNeutral;
+		p.LitFraction = rng.RandfRange(0.18f, 0.36f);   // a touch brighter than the towers — a lit walkway reads as a connector
+		p.Variation = rng.RandfRange(0.10f, 0.35f);     // fairly uniform (an enclosed corridor, not flats)
+		p.GridClass = rng.RandfRange(0.00f, 0.40f);
+		p.AccentHue = PickAccentHue(rng);
+		p.AccentAmount = rng.RandfRange(0.00f, 0.10f);
+		return p;
+	}
+
+	// Second pass: link some adjacent same-side towers (column c to c+1, same row) with a skybridge — a
+	// lit horizontal box that rides the building MultiMesh (so it gets windows for free) and sits OUTSIDE
+	// the flyable corridor. Iterates the deterministic `placed` order and continues the building stream.
+	private void BridgeBuildings(RandomNumberGenerator rng, BuildingLayout layout, Dictionary<(int, int, int), PlacedBuilding> lookup, List<PlacedBuilding> placed, float scale)
+	{
+		foreach (PlacedBuilding a in placed)
+		{
+			if (a.Col >= ColumnsPerSide - 1)
+				continue;
+			if (!lookup.TryGetValue((SideIdx(a.Side), a.Col + 1, a.Row), out PlacedBuilding b))
+				continue;
+			if (rng.Randf() > SkybridgeChance)
+				continue;
+			float side = a.Side;
+			float aFace = a.X + side * a.HalfX;     // a's face toward b (outward from the corridor)
+			float bFace = b.X - side * b.HalfX;     // b's face toward a (inward)
+			float gap = Mathf.Abs(bFace - aFace);
+			if (gap < 4.0f * scale || gap > 140.0f * scale)
+				continue;                           // overlapping, or too far apart to bridge cleanly
+			float embed = 5.0f * scale;             // sink the ends a little into both towers
+			float lenX = gap + 2.0f * embed;
+			float centerX = 0.5f * (aFace + bFace);
+			float minTop = Mathf.Min(a.Top, b.Top);
+			float by = rng.RandfRange(0.3f, 0.72f) * minTop;
+			float midZ = 0.5f * (a.Z + b.Z);
+			float h = rng.RandfRange(5.0f, 10.0f) * scale;
+			float w = rng.RandfRange(8.0f, 16.0f) * scale;
+			Basis basis = Basis.Identity.Scaled(new Vector3(lenX, h, w));
+			AddBoxInstance(layout, new Transform3D(basis, new Vector3(centerX, by, midZ)), BridgeProfile(rng));
+		}
+	}
+
+	private static int SideIdx(float side) => side < 0.0f ? 0 : 1;
+
+	// A placed tower's bridge-relevant facts (its side/column/row slot, centre, top, and outward X extent).
+	private struct PlacedBuilding
+	{
+		public float Side;
+		public int Col;
+		public int Row;
+		public float X;
+		public float Z;
+		public float Top;
+		public float HalfX;
 	}
 
 	private void GenerateObstacles(long baseSeed, int pIndex, float diff)
@@ -317,6 +642,7 @@ public partial class CityChunk : Node3D
 				var mm = new MultiMesh();
 				mm.TransformFormat = MultiMesh.TransformFormatEnum.Transform3D;
 				mm.UseColors = true;                 // must be set before InstanceCount; feeds the shader's COLOR
+				mm.UseCustomData = true;             // ...and INSTANCE_CUSTOM: the per-building lighting profile
 				mm.Mesh = meshes[k];
 				mmi.Multimesh = mm;
 				AddChild(mmi);
@@ -328,6 +654,39 @@ public partial class CityChunk : Node3D
 		{
 			for (int k = 0; k < _mms.Count; k++)
 				_mms[k].Mesh = meshes[k];
+		}
+		EnsureRoofMultimeshes();
+	}
+
+	// The two per-chunk rooftop MultiMeshes (masts + beacons). Each is a single draw call per chunk,
+	// sharing one mesh + material across the whole game (allocated once, statically).
+	private void EnsureRoofMultimeshes()
+	{
+		if (_antennaMmi == null)
+		{
+			_antennaMm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = GetAntennaMesh() };
+			_antennaMmi = new MultiMeshInstance3D { Name = "Antennas", Multimesh = _antennaMm, MaterialOverride = GetAntennaMat() };
+			_antennaMmi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+			AddChild(_antennaMmi);
+		}
+		if (_beaconMmi == null)
+		{
+			_beaconMm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = GetBeaconMesh() };
+			_beaconMmi = new MultiMeshInstance3D { Name = "Beacons", Multimesh = _beaconMm, MaterialOverride = GetBeaconMat() };
+			_beaconMmi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+			AddChild(_beaconMmi);
+		}
+		if (_spireMmi == null)
+		{
+			_spireMm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = GetSpireMesh() };
+			_spireMmi = new MultiMeshInstance3D { Name = "Spires", Multimesh = _spireMm, MaterialOverride = GetStructureMat() };
+			AddChild(_spireMmi);
+		}
+		if (_domeMmi == null)
+		{
+			_domeMm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = GetDomeMesh() };
+			_domeMmi = new MultiMeshInstance3D { Name = "Domes", Multimesh = _domeMm, MaterialOverride = GetStructureMat() };
+			AddChild(_domeMmi);
 		}
 	}
 
@@ -398,8 +757,7 @@ public partial class CityChunk : Node3D
 			_buildingMat.Shader = BuildingShader;
 		}
 		_buildingMat.SetShaderParameter("windows_on", windows ? 1.0f : 0.0f);
-		_buildingMat.SetShaderParameter("window_size_v", 4.0f * pWorldScale);
-		_buildingMat.SetShaderParameter("window_size_h", 5.0f * pWorldScale);
+		_buildingMat.SetShaderParameter("window_scale", pWorldScale);   // per-building grid sizes are scaled by this
 		if (_buildingMeshes == null)
 		{
 			// Index order MUST match the Silhouette enum (Box, Round, Prism, Taper).
@@ -458,5 +816,117 @@ public partial class CityChunk : Node3D
 			_obstacleMat.SetShaderParameter("pulse_on", pulse ? 1.0f : 0.0f);
 		}
 		return _obstacleMat;
+	}
+
+	// A dark, thin tapered mast (unit cylinder, scaled per roof). Hexagonal + low-poly so it reads as a
+	// lattice antenna at distance for almost nothing.
+	private static Mesh GetAntennaMesh()
+	{
+		if (_antennaMesh == null)
+		{
+			_antennaMesh = new CylinderMesh
+			{
+				Height = 1.0f,
+				TopRadius = 0.18f,
+				BottomRadius = 0.5f,
+				RadialSegments = 6,
+				Rings = 0,
+			};
+		}
+		return _antennaMesh;
+	}
+
+	private static StandardMaterial3D GetAntennaMat()
+	{
+		if (_antennaMat == null)
+		{
+			_antennaMat = new StandardMaterial3D
+			{
+				AlbedoColor = new Color(0.02f, 0.022f, 0.03f),
+				Metallic = 0.7f,
+				Roughness = 0.45f,
+			};
+		}
+		return _antennaMat;
+	}
+
+	// A small low-poly sphere (unit radius 0.5, scaled per roof), drawn by the blinking beacon shader.
+	private static Mesh GetBeaconMesh()
+	{
+		if (_beaconMesh == null)
+		{
+			_beaconMesh = new SphereMesh
+			{
+				Radius = 0.5f,
+				Height = 1.0f,
+				RadialSegments = 8,
+				Rings = 4,
+			};
+		}
+		return _beaconMesh;
+	}
+
+	private static ShaderMaterial GetBeaconMat()
+	{
+		if (_beaconMat == null)
+		{
+			_beaconMat = new ShaderMaterial();
+			_beaconMat.Shader = BeaconShader;
+		}
+		return _beaconMat;
+	}
+
+	// A pointed spire / cone roof cap (unit cone — top radius 0). Few radial segments for a faceted look.
+	private static Mesh GetSpireMesh()
+	{
+		if (_spireMesh == null)
+		{
+			_spireMesh = new CylinderMesh
+			{
+				Height = 1.0f,
+				TopRadius = 0.0f,
+				BottomRadius = 0.5f,
+				RadialSegments = 12,
+				Rings = 0,
+			};
+		}
+		return _spireMesh;
+	}
+
+	// A dome roof cap (unit sphere; placed with its equator at the roofline so only the top half shows).
+	private static Mesh GetDomeMesh()
+	{
+		if (_domeMesh == null)
+		{
+			_domeMesh = new SphereMesh
+			{
+				Radius = 0.5f,
+				Height = 1.0f,
+				RadialSegments = 16,
+				Rings = 6,
+			};
+		}
+		return _domeMesh;
+	}
+
+	// Dark structural concrete/metal for rooftop caps — catches a faint sky reflection so domes/spires
+	// read as silhouettes against the neon haze. Shared across the whole game.
+	private static StandardMaterial3D GetStructureMat()
+	{
+		if (_structureMat == null)
+		{
+			// Glossy dark concrete/metal that catches the neon city, plus a faint cool self-glow so the
+			// spires/domes read as deliberate forms against the night instead of vanishing into black.
+			_structureMat = new StandardMaterial3D
+			{
+				AlbedoColor = new Color(0.05f, 0.055f, 0.07f),
+				Metallic = 0.5f,
+				Roughness = 0.38f,
+				EmissionEnabled = true,
+				Emission = new Color(0.10f, 0.13f, 0.22f),
+				EmissionEnergyMultiplier = 0.5f,
+			};
+		}
+		return _structureMat;
 	}
 }
