@@ -481,11 +481,12 @@ func _register_input() -> void:
 	_add_action(&"steer_up",    [KEY_W, KEY_UP])
 	_add_action(&"steer_down",  [KEY_S, KEY_DOWN])
 	_add_action(&"accelerate",  [KEY_SHIFT, KEY_SPACE])
-	_add_action(&"decelerate",  [KEY_CTRL])
+	_add_action(&"decelerate",  [KEY_CTRL, KEY_X, KEY_C, KEY_V])
 	_add_action(&"cycle_camera",[KEY_Q])
 	_add_action(&"restart",     [KEY_R])
 	_add_action(&"toggle_fullscreen", [KEY_F])
 	_add_action(&"quit",        [KEY_ESCAPE])
+	_add_mouse_action(&"rear_view", MOUSE_BUTTON_MIDDLE)  # hold middle mouse = glance behind
 
 
 func _add_action(action: StringName, keys: Array) -> void:
@@ -496,3 +497,12 @@ func _add_action(action: StringName, keys: Array) -> void:
 		var ev := InputEventKey.new()
 		ev.physical_keycode = k
 		InputMap.action_add_event(action, ev)
+
+
+func _add_mouse_action(action: StringName, button: int) -> void:
+	if InputMap.has_action(action):
+		return
+	InputMap.add_action(action)
+	var ev := InputEventMouseButton.new()
+	ev.button_index = button
+	InputMap.action_add_event(action, ev)

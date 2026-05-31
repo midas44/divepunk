@@ -114,9 +114,13 @@ func _process(delta: float) -> void:
 	# car with no look_at — reaching directly above / below with no pole degeneracy, and keeping
 	# the car dead-centre at every angle (the lag-free boom is what lets the orbit reach the front).
 	var pivot := _target.global_position
-	var spin := Basis.IDENTITY
-	if mouse_look_enabled:
-		spin = Basis.from_euler(Vector3(_look_pitch, _look_yaw, 0.0))
+	# Held free-look orbit, plus a hold-to-glance-behind on `rear_view` (middle mouse): while it's
+	# held, swing the orbit a half-turn so the camera flips to the FRONT and looks back down the trail.
+	var view_yaw: float = _look_yaw if mouse_look_enabled else 0.0
+	var view_pitch: float = _look_pitch if mouse_look_enabled else 0.0
+	if Input.is_action_pressed(&"rear_view"):
+		view_yaw += PI
+	var spin := Basis.from_euler(Vector3(view_pitch, view_yaw, 0.0))
 	# Ease the boom length toward the selected distance level (close / normal / far via Q).
 	var target_mult: float = _distances[_distance_index] if not _distances.is_empty() else 1.0
 	_distance_mult = lerpf(_distance_mult, target_mult, 1.0 - exp(-distance_zoom_sharpness * delta))
