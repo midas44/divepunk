@@ -2,8 +2,10 @@
 # DIVEPUNK convenience runner — wraps the common Godot 4.6 commands.
 # Usage: ./run.sh [command]   (run "./run.sh help" for the list)
 #
-# The Godot binary is auto-detected (godot, then godot4). Override with:
+# The Godot binary is auto-detected (godot-mono, then godot, then godot4). Override with:
 #   GODOT=/path/to/godot ./run.sh play
+# NOTE: this is a C# (.NET) project — it needs the Mono/.NET build of Godot (godot-mono),
+# so the auto-detect prefers it. Run `./run.sh build` to compile C# before a headless run.
 
 set -euo pipefail
 
@@ -16,12 +18,14 @@ BUILD_DIR="build"
 # --- locate the Godot binary -------------------------------------------------
 GODOT_BIN="${GODOT:-}"
 if [[ -z "$GODOT_BIN" ]]; then
-	if command -v godot >/dev/null 2>&1; then
+	if command -v godot-mono >/dev/null 2>&1; then
+		GODOT_BIN="godot-mono"
+	elif command -v godot >/dev/null 2>&1; then
 		GODOT_BIN="godot"
 	elif command -v godot4 >/dev/null 2>&1; then
 		GODOT_BIN="godot4"
 	else
-		echo "error: no 'godot' or 'godot4' on PATH. Set GODOT=/path/to/godot." >&2
+		echo "error: no 'godot-mono', 'godot' or 'godot4' on PATH. Set GODOT=/path/to/godot." >&2
 		exit 1
 	fi
 fi
@@ -34,6 +38,7 @@ Usage: ./run.sh [command]
 
   play            Play the main scene ($MAIN_SCENE)   [default]
   editor          Open the project in the Godot editor
+  build           Compile the C# solution (dotnet build -c Debug) — run before headless
   check           Headless smoke-test: import, run 180 frames, quit (exit 0 = OK)
   import          Headless import only (regenerate .godot/)
   export-linux    Export release Linux  -> $BUILD_DIR/divepunk.x86_64
@@ -52,6 +57,10 @@ case "$cmd" in
 		;;
 	editor)
 		exec "$GODOT_BIN" --editor --path .
+		;;
+	build)
+		echo ":: building C# (dotnet build -c Debug)..."
+		exec dotnet build -c Debug
 		;;
 	check)
 		echo ":: importing..."
