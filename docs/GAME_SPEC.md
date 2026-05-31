@@ -35,10 +35,10 @@ You pilot a flying car at exhilarating speed through the canyons of an endless, 
 
 ### Chosen stack
 - **Engine:** **Godot 4.6** (current stable, Jan 2026). MIT-licensed → zero fees/royalties, ideal for going commercial.
-- **Primary language:** **GDScript** — Python-like, stable across the 4.x line, huge training corpus → the best language for AI-assisted ("vibe") coding.
+- **Primary language:** **C# (.NET 8)** — ported from typed GDScript for a large CPU-performance headroom over the interpreted runtime, while keeping the Godot editor, text `.tscn` scenes, the Android export path, and an AI-friendly workflow. Needs the **.NET/Mono build** of Godot (`godot-mono`). (The game was prototyped in GDScript through M4; see `docs/MIGRATION_GDSCRIPT_TO_CSHARP.md` for the behaviour-preserving port.)
 - **Physics:** **Jolt** (the default 3D physics engine in 4.6) — deterministic and stable, good for arcade car feel. We mostly use it for *collision detection*, not full rigid-body simulation (see [Player Controller](#74-player-controller)).
 - **Rendering:** **Forward+** renderer on desktop/Linux; **Mobile** renderer for the Android export preset.
-- **Optional native acceleration:** **Rust via `godot-rust` / gdext (v0.5, 2026)** — *only if* profiling shows GDScript can't keep up with procedural generation. The GDExtension API has stayed backward-compatible since Godot 4.1, so this is far more stable than building the whole game in a pure-Rust engine. **Do not start here** — it slows iteration. Reach for it only when a profiler tells you to.
+- **Optional native acceleration:** **Rust via `godot-rust` / gdext (v0.5, 2026)** — *only if* profiling shows C# can't keep up with procedural generation. The GDExtension API has stayed backward-compatible since Godot 4.1, so this is far more stable than building the whole game in a pure-Rust engine. **Do not start here** — it slows iteration. Reach for it only when a profiler tells you to.
 - **Version control:** Git from commit zero. Add a `.gitignore` for Godot (`.godot/`, export builds, `rust/target/`).
 
 ### Why not the alternatives (for *this* project)
@@ -47,7 +47,7 @@ You pilot a flying car at exhilarating speed through the canyons of an endless, 
 - **Three.js / web + Capacitor:** maximally reuses your TS skills, but high-speed procedural 3D that stays beautiful is exactly the workload where mobile WebGL/WebGPU struggles. Fine for a quick prototype; shaky as a commercial mobile target.
 
 ### Skills note
-GDScript is cheap to learn coming from TypeScript (productive in ~a day). Your Rust expertise isn't wasted — it's the optional accelerator above. Nothing here throws away what you know.
+C# is close to TypeScript (productive immediately), and the M0–M4 prototype phase used GDScript (also cheap to read). Your Rust expertise isn't wasted — it's the optional accelerator above. Nothing here throws away what you know.
 
 ---
 
@@ -178,16 +178,16 @@ res://
 │   ├── world/CityChunk.tscn
 │   ├── world/ChunkManager.tscn
 │   └── ui/{HUD,GameOver,MainMenu}.tscn
-├── scripts/
-│   ├── ship.gd
-│   ├── chunk_manager.gd
-│   ├── city_chunk.gd
-│   ├── obstacle.gd
-│   └── game.gd
+├── scripts/                      # C# — file name == class name
+│   ├── Ship.cs
+│   ├── ChunkManager.cs
+│   ├── CityChunk.cs
+│   ├── Traffic.cs
+│   └── Game.cs
 ├── autoload/                     # singletons (Project > Project Settings > Autoload)
-│   ├── GameState.gd
-│   ├── ScoreManager.gd
-│   └── AudioManager.gd
+│   ├── Config.cs
+│   ├── ScoreManager.cs
+│   └── AudioManager.cs
 ├── resources/
 │   ├── materials/                # neon emissive .tres
 │   ├── meshes/                   # building kit pieces
@@ -252,7 +252,7 @@ Daily seed → leaderboards/ghosts → meta-progression & unlocks → multiple s
 ## 10. Working with Claude Code
 
 - **Put this file at `docs/GAME_SPEC.md`** and keep a **lean `CLAUDE.md`** at the repo root. `CLAUDE.md` is auto-loaded into context at the start of every Claude Code session, so keep it short and specific — it's for things needed *every* session, not the full design (that lives here and gets referenced).
-- A good `CLAUDE.md` for this project contains: Godot version (4.6), how to run/export (commands), GDScript style conventions, the project layout, a few "always do X" rules, and a pointer like `See @docs/GAME_SPEC.md for full design and the milestone roadmap.`
+- A good `CLAUDE.md` for this project contains: Godot version (4.6), how to run/export (commands), C# style conventions, the project layout, a few "always do X" rules, and a pointer like `See @docs/GAME_SPEC.md for full design and the milestone roadmap.`
 - You can run **`/init`** to scaffold a `CLAUDE.md`, then trim it down.
 - **Work milestone by milestone.** Ask Claude Code to implement one milestone (or sub-task) at a time, then playtest before moving on. Use **`/clear`** between unrelated tasks to keep context clean.
 - **Track progress with the checkboxes** in this doc (or a separate `TASKS.md`) — Claude Code can tick them off as work completes.
@@ -271,7 +271,7 @@ Things **you** should decide (some via playtest):
 - [ ] **Android input scheme:** virtual joystick vs. tilt steering. Prototype both in M5, decide by feel.
 - [ ] **Commercial model:** premium one-time purchase, free + cosmetic unlocks, or ad-supported on mobile? (Godot adds no constraints here, but the choice shapes the meta-progression design.)
 - [ ] **Signature feature commitment:** is the **audio-reactive world** the identity of the game (high effort, high differentiation), or a nice-to-have? Decide after the core is fun.
-- [ ] **Rust or not:** defer entirely until a profiler proves GDScript is the bottleneck for procedural generation.
+- [ ] **Rust or not:** defer entirely until a profiler proves C# is the bottleneck for procedural generation.
 
 ---
 
