@@ -25,6 +25,10 @@ AudioManager="*res://autoload/audio_manager.gd"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 
+[dotnet]
+
+project/assembly_name="DIVEPUNK"
+
 [layer_names]
 
 3d_physics/layer_1="ship"
@@ -36,6 +40,5 @@ common/physics_ticks_per_second=160
 
 [rendering]
 
-renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="forward_plus"
 anti_aliasing/quality/use_debanding=true
