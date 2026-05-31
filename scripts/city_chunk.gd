@@ -207,7 +207,7 @@ func _ensure_obstacles() -> void:
 		var mesh := MeshInstance3D.new()
 		mesh.name = "Mesh"
 		mesh.mesh = _get_obstacle_mesh()                     # shared unit cube, scaled per obstacle
-		mesh.material_override = _get_obstacle_mat()
+		mesh.material_override = _get_obstacle_mat(hazard_pulse)
 		ob.add_child(mesh)
 
 		ob.visible = false
