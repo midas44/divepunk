@@ -4,7 +4,7 @@ using Godot;
 // ScoreManager autoload) and a boost-meter bar (polled from the ship each frame).
 // Presentation-only: it reads game state, never mutates it.
 [GlobalClass]
-public partial class HUD : CanvasLayer
+public partial class Hud : CanvasLayer
 {
 	private Ship _ship;            // provides GetBoostMeter()
 	private Label _scoreLabel;

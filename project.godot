@@ -16,9 +16,9 @@ config/features=PackedStringArray("4.6", "Forward Plus")
 
 [autoload]
 
-Config="*res://autoload/config.gd"
-ScoreManager="*res://autoload/score_manager.gd"
-AudioManager="*res://autoload/audio_manager.gd"
+Config="*res://autoload/Config.cs"
+ScoreManager="*res://autoload/ScoreManager.cs"
+AudioManager="*res://autoload/AudioManager.cs"
 
 [display]
 

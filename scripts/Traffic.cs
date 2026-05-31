@@ -11,7 +11,7 @@ using System.Collections.Generic;
 // instantiate / free). Their colour is a distinct hot magenta so they read instantly as moving
 // hazards, separate from the amber static obstacles and the blue buildings.
 [GlobalClass]
-public partial class TrafficManager : Node3D
+public partial class Traffic : Node3D
 {
 	private const string ObstacleGroup = "obstacle";
 	private const int ObstacleLayer = 2;          // 1-indexed physics layer for obstacles (matches Ship.cs / project.godot)

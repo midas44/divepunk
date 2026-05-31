@@ -7,7 +7,7 @@ using Godot;
 // so the overlay stays presentation-only — one key and you're instantly back in, which is
 // the whole "one more go" loop.
 [GlobalClass]
-public partial class GameOverScreen : CanvasLayer
+public partial class GameOver : CanvasLayer
 {
 	private Label _title;
 	private Label _score;
