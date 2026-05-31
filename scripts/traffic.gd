@@ -13,6 +13,9 @@ extends Node3D
 const OBSTACLE_GROUP := &"obstacle"
 const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (matches ship.gd / project.godot)
 
+## Shared M4 hazard shader (pulsing emissive + fresnel rim) — same one the static obstacles use.
+const HAZARD_SHADER := preload("res://shaders/hazard.gdshader")
+
 @export_group("Traffic")
 @export var car_count: int = 24                  ## how many moving cars exist at once (the pool size)
 @export var min_speed: float = 30.0              ## slowest car cruise speed (m/s)
@@ -32,13 +35,14 @@ const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (mat
 
 @export_group("Car")
 @export var car_size: Vector3 = Vector3(5.0, 2.0, 9.0)   ## a touch bigger than the player car so it reads as traffic
+@export var hazard_pulse: bool = true   ## pulsing-emissive + fresnel telegraph shader (set from [fx] hazard_pulse)
 
 @export_group("Generation")
 @export var world_seed: int = 0                  ## 0 = random; >0 = reproducible initial layout
 
 ## Shared mesh + material across every car (one allocation, not one per car).
 static var _car_mesh: BoxMesh
-static var _car_mat: StandardMaterial3D
+static var _car_mat: ShaderMaterial
 
 var _target: Node3D
 var _cars: Array[StaticBody3D] = []
@@ -91,7 +95,7 @@ func _build_pool() -> void:
 		var mesh := MeshInstance3D.new()
 		mesh.name = "Mesh"
 		mesh.mesh = _get_car_mesh()                # shared unit cube...
-		mesh.material_override = _get_car_mat()
+		mesh.material_override = _get_car_mat(hazard_pulse)
 		mesh.scale = car_size                       # ...scaled to the car size
 		car.add_child(mesh)
 
@@ -155,15 +159,15 @@ static func _get_car_mesh() -> BoxMesh:
 	return _car_mesh
 
 
-## Hot magenta, strongly emissive — deliberately distinct from the amber static obstacles and
-## the cool-blue buildings, so moving traffic reads instantly as a separate hazard.
-static func _get_car_mat() -> StandardMaterial3D:
+## Hot magenta, pulsing + fresnel-rimmed (the shared hazard shader) — distinct from the amber static
+## obstacles and the cool-blue buildings, so moving traffic reads instantly as a separate hazard.
+## Cached statically; `pulse` is a global [fx] toggle (false = steady magenta).
+static func _get_car_mat(pulse: bool) -> ShaderMaterial:
 	if _car_mat == null:
-		_car_mat = StandardMaterial3D.new()
-		_car_mat.albedo_color = Color(0.55, 0.05, 0.5)
-		_car_mat.metallic = 0.0
-		_car_mat.roughness = 0.5
-		_car_mat.emission_enabled = true
-		_car_mat.emission = Color(1.0, 0.1, 0.85)
-		_car_mat.emission_energy_multiplier = 2.6
+		_car_mat = ShaderMaterial.new()
+		_car_mat.shader = HAZARD_SHADER
+		_car_mat.set_shader_parameter("base_color", Color(0.55, 0.05, 0.5))
+		_car_mat.set_shader_parameter("emission_color", Color(1.0, 0.1, 0.85))
+		_car_mat.set_shader_parameter("emission_energy", 2.6)
+		_car_mat.set_shader_parameter("pulse_on", 1.0 if pulse else 0.0)
 	return _car_mat

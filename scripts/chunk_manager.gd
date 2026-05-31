@@ -34,6 +34,10 @@ const CityChunkScene := preload("res://scenes/world/CityChunk.tscn")
 @export var corridor_floor: float = 4.0          ## corridor floor; pushed to each chunk so obstacles fill the full height
 @export var corridor_ceiling: float = 1700.0     ## corridor ceiling; pushed to each chunk so obstacles fill the full height
 
+@export_group("Aesthetic (M4)")
+@export var building_windows: bool = true    ## neon-window shader on buildings (pushed to chunks; set from [fx] building_windows)
+@export var hazard_pulse: bool = true        ## pulsing telegraph shader on obstacles (pushed to chunks; set from [fx] hazard_pulse)
+
 @export_group("Debug")
 @export var log_streaming: bool = false      ## print spawn/recycle events to the console
 
@@ -78,6 +82,8 @@ func _create_pool() -> void:
 		c.corridor_half_width = corridor_half_width
 		c.corridor_floor = corridor_floor
 		c.corridor_ceiling = corridor_ceiling
+		c.building_windows = building_windows
+		c.hazard_pulse = hazard_pulse
 		add_child(c)
 		_pool.append(c)
 

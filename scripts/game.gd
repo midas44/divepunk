@@ -103,6 +103,8 @@ func _spawn_world() -> void:
 	_mgr.corridor_half_width = float(_cfg_value("corridor", "half_width", _mgr.corridor_half_width))
 	_mgr.corridor_floor = float(_cfg_value("corridor", "floor", _mgr.corridor_floor))
 	_mgr.corridor_ceiling = float(_cfg_value("corridor", "ceiling", _mgr.corridor_ceiling))
+	_mgr.building_windows = bool(_cfg_value("fx", "building_windows", _mgr.building_windows))
+	_mgr.hazard_pulse = bool(_cfg_value("fx", "hazard_pulse", _mgr.hazard_pulse))
 	add_child(_mgr)
 	_mgr.set_target(_ship)
 
@@ -127,6 +129,7 @@ func _apply_traffic_config(t: Node3D) -> void:
 	t.corridor_half_width = float(_cfg_value("corridor", "half_width", t.corridor_half_width))
 	t.corridor_floor = float(_cfg_value("corridor", "floor", t.corridor_floor))
 	t.corridor_ceiling = float(_cfg_value("corridor", "ceiling", t.corridor_ceiling))
+	t.hazard_pulse = bool(_cfg_value("fx", "hazard_pulse", t.hazard_pulse))
 	t.world_seed = int(_cfg_value("game", "seed", 0))
 
 

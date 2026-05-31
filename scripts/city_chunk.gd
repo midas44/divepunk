@@ -19,6 +19,10 @@ extends Node3D
 const OBSTACLE_GROUP := &"obstacle"
 const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (see project.godot)
 
+## M4 neon look — procedural shaders shared by every chunk (see shaders/).
+const BUILDING_SHADER := preload("res://shaders/building.gdshader")
+const HAZARD_SHADER := preload("res://shaders/hazard.gdshader")
+
 @export_group("Chunk")
 @export var chunk_length: float = 200.0          ## metres along -Z (ChunkManager keeps this in sync)
 
@@ -38,6 +42,7 @@ const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (see
 @export_range(0.0, 1.0) var fill_chance: float = 0.86   ## per-slot chance of a building (gaps add variety)
 @export_range(0.0, 1.0) var cell_depth_jitter: float = 0.35
 @export var world_scale: float = 1.0   ## set by ChunkManager; >1 enlarges buildings + spacing around the constant-size car (1.0 = original)
+@export var building_windows: bool = true   ## procedural neon-window shader (set by ChunkManager from [fx] building_windows); false = flat emissive boxes
 
 @export_group("Obstacles")
 @export var safe_chunks: int = 2                 ## first N chunks have no obstacles (a warm-up runway)
@@ -47,11 +52,12 @@ const OBSTACLE_LAYER := 2          ## 1-indexed physics layer for obstacles (see
 @export_range(0.0, 1.0) var obstacle_y_fraction: float = 0.85  ## ...and this fraction of the floor→ceiling height, centred
 @export var obstacle_min_size: Vector3 = Vector3(4.0, 6.0, 4.0)
 @export var obstacle_max_size: Vector3 = Vector3(12.0, 44.0, 12.0)
+@export var hazard_pulse: bool = true   ## pulsing-emissive + fresnel telegraph shader (set by ChunkManager from [fx] hazard_pulse)
 
 ## Shared across every chunk so we allocate one mesh + material, not one per chunk/instance.
 static var _building_mesh: BoxMesh
 static var _obstacle_mesh: BoxMesh
-static var _obstacle_mat: StandardMaterial3D
+static var _obstacle_mat: ShaderMaterial
 
 var index: int = 0
 var _mm: MultiMesh
@@ -176,8 +182,8 @@ func _ensure_multimesh() -> void:
 		add_child(_mmi)
 	_mm = MultiMesh.new()
 	_mm.transform_format = MultiMesh.TRANSFORM_3D
-	_mm.use_colors = true                   # must be set before instance_count
-	_mm.mesh = _get_building_mesh()
+	_mm.use_colors = true                   # must be set before instance_count; feeds the shader's COLOR
+	_mm.mesh = _get_building_mesh(building_windows)
 	_mmi.multimesh = _mm
 
 
@@ -220,20 +226,17 @@ func _mix_seed(base_seed: int, idx: int, salt: int) -> int:
 	return h
 
 
-## One shared unit-cube mesh + material for all building instances. Per-instance colour comes
-## through as vertex colour (hence vertex_color_use_as_albedo). A faint emission lifts the boxes
-## out of the dark void; M4's aesthetic pass replaces this with real neon materials.
-static func _get_building_mesh() -> BoxMesh:
+## One shared unit-cube mesh + neon-window ShaderMaterial for all building instances (M4). The
+## MultiMesh feeds the per-building hue through COLOR; the shader turns it into lit windows. Cached
+## statically, so `windows` is resolved once (it's a global [fx] toggle — every chunk passes the
+## same value). windows = false leaves a flat dim emissive body.
+static func _get_building_mesh(windows: bool) -> BoxMesh:
 	if _building_mesh == null:
 		var mesh := BoxMesh.new()
 		mesh.size = Vector3.ONE
-		var mat := StandardMaterial3D.new()
-		mat.vertex_color_use_as_albedo = true
-		mat.metallic = 0.0
-		mat.roughness = 0.65
-		mat.emission_enabled = true
-		mat.emission = Color(0.10, 0.20, 0.35)
-		mat.emission_energy_multiplier = 0.6
+		var mat := ShaderMaterial.new()
+		mat.shader = BUILDING_SHADER
+		mat.set_shader_parameter("windows_on", 1.0 if windows else 0.0)
 		mesh.material = mat
 		_building_mesh = mesh
 	return _building_mesh
@@ -246,15 +249,15 @@ static func _get_obstacle_mesh() -> BoxMesh:
 	return _obstacle_mesh
 
 
-## Warm amber, strongly emissive — deliberately distinct from the cool-blue buildings so
-## obstacles read instantly as "danger" at speed (spec §5.11, fairness via telegraphing).
-static func _get_obstacle_mat() -> StandardMaterial3D:
+## Warm amber, pulsing + fresnel-rimmed (the shared hazard shader) — deliberately distinct from the
+## cool-blue buildings so obstacles read instantly as "danger" at speed (spec §5.11, fairness via
+## telegraphing). Cached statically; `pulse` is a global [fx] toggle. pulse = false = steady amber.
+static func _get_obstacle_mat(pulse: bool) -> ShaderMaterial:
 	if _obstacle_mat == null:
-		_obstacle_mat = StandardMaterial3D.new()
-		_obstacle_mat.albedo_color = Color(0.6, 0.25, 0.05)
-		_obstacle_mat.metallic = 0.0
-		_obstacle_mat.roughness = 0.5
-		_obstacle_mat.emission_enabled = true
-		_obstacle_mat.emission = Color(1.0, 0.45, 0.1)
-		_obstacle_mat.emission_energy_multiplier = 2.6
+		_obstacle_mat = ShaderMaterial.new()
+		_obstacle_mat.shader = HAZARD_SHADER
+		_obstacle_mat.set_shader_parameter("base_color", Color(0.6, 0.25, 0.05))
+		_obstacle_mat.set_shader_parameter("emission_color", Color(1.0, 0.45, 0.1))
+		_obstacle_mat.set_shader_parameter("emission_energy", 2.6)
+		_obstacle_mat.set_shader_parameter("pulse_on", 1.0 if pulse else 0.0)
 	return _obstacle_mat
