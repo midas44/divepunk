@@ -16,7 +16,7 @@ const CityChunkScene := preload("res://scenes/world/CityChunk.tscn")
 
 @export_group("Streaming")
 @export var chunk_length: float = 200.0      ## metres per chunk (pushed down to each CityChunk)
-@export var chunks_ahead: int = 14           ## chunks kept generated ahead of the ship (× chunk_length = draw distance)
+@export var chunks_ahead: int = 72           ## chunks kept generated ahead of the ship (× chunk_length = draw distance). ~5× the old default for the long view; set from [streaming] in settings.cfg.
 @export var chunks_behind: int = 1           ## how many to keep behind (so the player isn't on the edge)
 @export var builds_per_frame: int = 1        ## amortisation cap: max chunk (re)builds per frame
 

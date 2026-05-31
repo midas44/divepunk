@@ -27,9 +27,13 @@ extends Node3D
 @export var distance_zoom_sharpness: float = 8.0  ## how fast the boom eases between levels when you press Q
 
 @export_group("FOV")
-@export var base_fov: float = 70.0
-@export var max_fov: float = 96.0                       ## widens with speed = sense of velocity
+@export var base_fov: float = 78.0                      ## cruising vertical FOV — a touch wider than stock for situational awareness at scale
+@export var max_fov: float = 100.0                      ## widens with speed = sense of velocity
 @export var fov_sharpness: float = 4.0
+
+@export_group("Clipping")
+@export var near_distance: float = 0.1                  ## near clip plane (m)
+@export var far_distance: float = 18000.0              ## far clip = hard draw distance (m); NOTHING renders past it. Keep it > the city draw distance so fog (not the clip plane) hides the edge.
 
 @export_group("Shake")
 @export var shake_decay: float = 5.0
@@ -56,6 +60,8 @@ func _ready() -> void:
 		_cam = Camera3D.new()
 		_cam.name = "Camera"
 		add_child(_cam)
+	_cam.near = near_distance
+	_cam.far = far_distance
 	_cam.fov = base_fov
 	_distances = [distance_close, distance_normal, distance_far]
 	_distance_index = clampi(distance_default_index, 0, _distances.size() - 1)

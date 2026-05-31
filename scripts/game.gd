@@ -35,6 +35,7 @@ var _traffic: Node3D
 var _fx: CanvasLayer
 var _game_over: GameOverScreen
 var _hud: HUD
+var _ground: MeshInstance3D
 
 var _was_boosting: bool = false
 var _td_timer: float = 0.0       ## remaining real-time slow-mo (s)
@@ -123,6 +124,12 @@ func _spawn_world() -> void:
 	_mgr.corridor_half_width = float(_cfg_value("corridor", "half_width", _mgr.corridor_half_width))
 	_mgr.corridor_floor = float(_cfg_value("corridor", "floor", _mgr.corridor_floor))
 	_mgr.corridor_ceiling = float(_cfg_value("corridor", "ceiling", _mgr.corridor_ceiling))
+	# Streaming / draw distance (the "view area" lever): chunks_ahead × chunk_length metres of city.
+	# Set before add_child so _ready() sizes the chunk pool from them.
+	_mgr.chunk_length = float(_cfg_value("streaming", "chunk_length", _mgr.chunk_length))
+	_mgr.chunks_ahead = int(_cfg_value("streaming", "chunks_ahead", _mgr.chunks_ahead))
+	_mgr.chunks_behind = int(_cfg_value("streaming", "chunks_behind", _mgr.chunks_behind))
+	_mgr.builds_per_frame = int(_cfg_value("streaming", "builds_per_frame", _mgr.builds_per_frame))
 	_mgr.building_windows = bool(_cfg_value("fx", "building_windows", _mgr.building_windows))
 	_mgr.hazard_pulse = bool(_cfg_value("fx", "hazard_pulse", _mgr.hazard_pulse))
 	add_child(_mgr)
@@ -201,6 +208,9 @@ func _process(_delta: float) -> void:
 	# Drive the score: distance is how far the ship has flown (-Z), plus the decaying combo.
 	if _ship != null:
 		ScoreManager.set_distance(-_ship.global_position.z)
+		# Slide the (uniform) reflective ground with the ship so the now-long, thin-fog view never reaches its edge.
+		if _ground != null:
+			_ground.global_position.z = _ship.global_position.z
 	ScoreManager.tick(_delta)
 	# Ease any active near-miss slow-mo, using REAL time (recovered from the scaled frame delta).
 	_update_time_dilation(_delta / maxf(Engine.time_scale, 0.001))
@@ -307,6 +317,10 @@ func _apply_camera_config(rig: Node3D) -> void:
 	rig.distance_normal = float(_cfg_value("camera", "distance_normal", rig.distance_normal))
 	rig.distance_far = float(_cfg_value("camera", "distance_far", rig.distance_far))
 	rig.distance_default_index = int(_cfg_value("camera", "default_level", rig.distance_default_index))
+	rig.base_fov = float(_cfg_value("camera", "base_fov", rig.base_fov))
+	rig.max_fov = float(_cfg_value("camera", "max_fov", rig.max_fov))
+	rig.near_distance = float(_cfg_value("camera", "near", rig.near_distance))
+	rig.far_distance = float(_cfg_value("camera", "far", rig.far_distance))
 
 
 func _ensure_environment() -> void:
@@ -328,10 +342,12 @@ func _ensure_environment() -> void:
 	if get_node_or_null(^"RefGround") == null:
 		# A long, near-black WET street: low roughness + a little metal so SSR mirrors the neon
 		# skyline in it (spec §7.7, wet-street reflections). Reads as dark glass when SSR is off.
+		# Stored as _ground and slid along with the ship each frame (see _process) so the long
+		# thin-fog view never flies off its edge.
 		var ground := MeshInstance3D.new()
 		ground.name = "RefGround"
 		var plane := PlaneMesh.new()
-		plane.size = Vector2(4000.0, 44000.0)
+		plane.size = Vector2(8000.0, 48000.0)
 		ground.mesh = plane
 		var gm := StandardMaterial3D.new()
 		gm.albedo_color = Color(0.012, 0.016, 0.03)
@@ -339,8 +355,9 @@ func _ensure_environment() -> void:
 		gm.metallic_specular = 0.6
 		gm.roughness = 0.22
 		ground.material_override = gm
-		ground.position = Vector3(0.0, 0.0, -20000.0)
+		ground.position = Vector3(0.0, 0.0, 0.0)
 		add_child(ground)
+	_ground = get_node_or_null(^"RefGround") as MeshInstance3D
 
 
 ## Assembles the neon-night Environment (M4 aesthetic pass, spec §7.7). The heavier desktop
@@ -386,20 +403,22 @@ func _build_environment() -> Environment:
 	for lvl: int in [1, 2, 3, 4, 5]:
 		env.set("glow_levels/%d" % lvl, true)
 
-	# Exponential distance fog — depth cue + conveniently hides the chunk draw distance.
+	# Exponential distance fog — depth cue that fades the FAR chunk edge into the horizon. Tuned for
+	# the long view: thin (so the city reads for kilometres) and a luminous neon-haze colour (so the
+	# distance fades to atmosphere, not to black), blended toward the sky band.
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.05, 0.06, 0.13)
-	env.fog_density = float(_cfg_value("fx", "fog_density", 0.01))
-	env.fog_sky_affect = 0.3
-	env.fog_aerial_perspective = 0.5
+	env.fog_light_color = Color(0.10, 0.12, 0.22)
+	env.fog_density = float(_cfg_value("fx", "fog_density", 0.00018))
+	env.fog_sky_affect = 0.7
+	env.fog_aerial_perspective = 0.4
 
 	# Volumetric fog — the real mood layer (desktop): a faint neon-tinted haze with true depth.
 	env.volumetric_fog_enabled = bool(_cfg_value("fx", "volumetric_fog", true))
-	env.volumetric_fog_density = float(_cfg_value("fx", "volumetric_fog_density", 0.018))
-	env.volumetric_fog_albedo = Color(0.06, 0.07, 0.16)
+	env.volumetric_fog_density = float(_cfg_value("fx", "volumetric_fog_density", 0.005))
+	env.volumetric_fog_albedo = Color(0.07, 0.08, 0.17)
 	env.volumetric_fog_emission = Color(0.05, 0.02, 0.10)
 	env.volumetric_fog_emission_energy = 0.4
-	env.volumetric_fog_length = 3200.0
+	env.volumetric_fog_length = float(_cfg_value("fx", "volumetric_fog_length", 6000.0))
 	env.volumetric_fog_gi_inject = 0.2
 
 	# Screen-space reflections — wet-street neon (Forward+ desktop); reflects in the RefGround.
