@@ -193,16 +193,16 @@ func _spawn_screen_fx() -> void:
 
 
 ## Forwards the ship's per-frame speed to the screen-FX layer (speed lines + aberration ramp), and
-## punches the camera the instant a boost kicks in (rising edge).
-func _on_ship_speed_changed(_speed: float, ratio: float, boosting: bool) -> void:
+## punches the camera + plays the thruster whoosh the instant you start throttling up (rising edge).
+func _on_ship_speed_changed(_speed: float, ratio: float, accelerating: bool) -> void:
 	if _fx != null:
 		_fx.set_speed_ratio(ratio)
-		_fx.set_boost(boosting)
-	if boosting and not _was_boosting:
+		_fx.set_boost(accelerating)
+	if accelerating and not _was_boosting:
 		if _rig != null and _rig.has_method(&"add_shake"):
 			_rig.add_shake(shake_on_boost)
 		_audio_call(&"boost")
-	_was_boosting = boosting
+	_was_boosting = accelerating
 
 
 func _process(_delta: float) -> void:
@@ -219,8 +219,6 @@ func _process(_delta: float) -> void:
 
 func _on_ship_near_miss() -> void:
 	ScoreManager.register_near_miss()
-	if _ship.has_method(&"add_boost"):
-		_ship.add_boost(_ship.boost_gain_per_near_miss)
 	if _rig != null and _rig.has_method(&"add_shake"):
 		_rig.add_shake(shake_on_near_miss)
 	if _fx != null and enable_near_miss_flash:
@@ -297,12 +295,11 @@ func _cfg_value(section: String, key: String, default: Variant) -> Variant:
 ## ship's own @export default when the key is absent.
 func _apply_ship_config(ship: CharacterBody3D) -> void:
 	ship.base_speed = float(_cfg_value("ship", "base_speed", ship.base_speed))
+	ship.min_speed = float(_cfg_value("ship", "min_speed", ship.min_speed))
 	ship.max_speed = float(_cfg_value("ship", "max_speed", ship.max_speed))
-	ship.boost_multiplier = float(_cfg_value("ship", "boost_multiplier", ship.boost_multiplier))
-	ship.boost_in_rate = float(_cfg_value("ship", "boost_in_rate", ship.boost_in_rate))
-	ship.boost_out_rate = float(_cfg_value("ship", "boost_out_rate", ship.boost_out_rate))
-	ship.vertical_speed = float(_cfg_value("ship", "vertical_speed", ship.vertical_speed))
-	ship.vertical_speed_fraction = float(_cfg_value("ship", "vertical_speed_fraction", ship.vertical_speed_fraction))
+	ship.accelerate_rate = float(_cfg_value("ship", "accelerate_rate", ship.accelerate_rate))
+	ship.decelerate_rate = float(_cfg_value("ship", "decelerate_rate", ship.decelerate_rate))
+	ship.climb_angle_deg = float(_cfg_value("ship", "climb_angle_deg", ship.climb_angle_deg))
 	ship.invert_pitch = bool(_cfg_value("ship", "invert_pitch", ship.invert_pitch))
 	ship.invert_bank = bool(_cfg_value("ship", "invert_bank", ship.invert_bank))
 	ship.bound_x = float(_cfg_value("corridor", "half_width", ship.bound_x))
@@ -483,7 +480,8 @@ func _register_input() -> void:
 	_add_action(&"steer_right", [KEY_D, KEY_RIGHT])
 	_add_action(&"steer_up",    [KEY_W, KEY_UP])
 	_add_action(&"steer_down",  [KEY_S, KEY_DOWN])
-	_add_action(&"boost",       [KEY_SHIFT, KEY_SPACE])
+	_add_action(&"accelerate",  [KEY_SHIFT, KEY_SPACE])
+	_add_action(&"decelerate",  [KEY_CTRL])
 	_add_action(&"cycle_camera",[KEY_Q])
 	_add_action(&"restart",     [KEY_R])
 	_add_action(&"toggle_fullscreen", [KEY_F])

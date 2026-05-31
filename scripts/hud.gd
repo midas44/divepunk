@@ -111,7 +111,7 @@ func _build() -> void:
 	boost_label.anchor_top = 1.0
 	boost_label.anchor_bottom = 1.0
 	boost_label.position = Vector2(28, -64)
-	boost_label.text = "BOOST"
+	boost_label.text = "THROTTLE"
 	boost_label.add_theme_font_size_override("font_size", 18)
 	boost_label.add_theme_color_override("font_color", Color(0.6, 0.65, 0.8))
 	root.add_child(boost_label)

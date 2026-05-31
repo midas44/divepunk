@@ -2,10 +2,10 @@ extends CharacterBody3D
 ## Arcade flight controller — DIVEPUNK, milestones M0–M3.
 ##
 ## Attach to a CharacterBody3D (game.gd will create one automatically if you just
-## press Play). Constant forward motion that ramps up over a run; the player steers
-## laterally and vertically within a corridor; hold `boost` for risky extra speed.
-## Every number is exported so you can dial in the "feel" live in the Inspector —
-## the speed/steering values ARE Milestone M1, so expect to spend real time tuning them.
+## press Play). Throttle-driven forward motion with inertia: the player throttles up/down
+## and steers laterally and vertically within a corridor. Every number is exported so you
+## can dial in the "feel" live in the Inspector — the speed/steering values ARE Milestone M1,
+## so expect to spend real time tuning them.
 ##
 ## Crash detection (M3) uses a direct physics-space shape query each frame, NOT an Area3D:
 ## under Godot 4.6 + Jolt, Area overlap callbacks proved unreliable here, while
@@ -13,23 +13,23 @@ extends CharacterBody3D
 ## spec's intent — use the physics engine to DETECT contact (spec §7.4), never to push the
 ## ship around. The near-miss query (a slightly larger box, spec §7.5) lands in M3b.
 
-@export_group("Speed")
-@export var base_speed: float = 70.0        ## forward speed at the start of a run (m/s)
-@export var max_speed: float = 220.0        ## ceiling the run-ramp climbs toward (m/s)
-@export var ramp_per_second: float = 1.5    ## how fast the speed floor grows over a run
-@export var boost_multiplier: float = 2.4   ## speed multiplier while boosting (bigger = more speed variation)
-@export var boost_in_rate: float = 7.0      ## how quickly boost eases IN when held (higher = snappier kick)
-@export var boost_out_rate: float = 1.6     ## how quickly boost eases OUT when released (lower = more gradual bleed-off, not a sharp drop)
+@export_group("Speed (throttle + inertia)")
+@export var base_speed: float = 300.0       ## forward speed a run STARTS at (m/s)
+@export var min_speed: float = 0.0          ## slowest the throttle reaches (m/s); raise above 0 so the ship never fully stops
+@export var max_speed: float = 2000.0       ## fastest the throttle reaches (m/s)
+@export var accelerate_rate: float = 240.0  ## throttle-up: how fast `accelerate` adds speed (m/s²)
+@export var decelerate_rate: float = 320.0  ## throttle-down: how fast `decelerate` bleeds speed (m/s²)
+## INERTIA: with neither throttle key held, speed is HELD constant (no auto-ramp, no drag) — the
+## engine maintains whatever speed you last throttled to. Speed is clamped to [min_speed, max_speed].
 
 @export_group("Steering")
 @export var lateral_speed: float = 45.0     ## max sideways speed (m/s)
-@export var vertical_speed: float = 35.0    ## FLOOR for climb / dive speed (m/s) — keeps low-speed control; see vertical_speed_fraction
-@export var vertical_speed_fraction: float = 0.5  ## climb/dive also scales with forward speed (this × forward); the LARGER of it and vertical_speed wins. 0.5 ≈ a 27° climb at speed; set the floor to 0 for purely proportional vertical
+@export var climb_angle_deg: float = 45.0   ## climb/dive steepness: vertical speed = forward_speed × tan(this). 45° climbs as fast as you fly; 0° = no vertical; clamped under 90°
 @export var steer_sharpness: float = 8.0    ## higher = snappier, lower = floatier
 @export var bank_angle_deg: float = 35.0    ## visual roll into turns (pure juice)
 @export var pitch_angle_deg: float = 15.0   ## visual pitch on climb / dive (pure juice)
 @export var invert_pitch: bool = true       ## true = nose pitches UP as you climb (natural arcade feel); false = the old nose-down tilt
-@export var invert_bank: bool = true        ## true = banks the opposite way into strafes; false = the old roll direction
+@export var invert_bank: bool = true        ## true = banks INTO strafes the natural way (direction corrected); false = the other roll
 @export var visual_lerp: float = 10.0       ## how fast the model banks / pitches
 
 @export_group("Corridor (half-extents from centre)")
@@ -41,27 +41,17 @@ extends CharacterBody3D
 @export var crash_size: Vector3 = Vector3(3.0, 1.0, 5.0)    ## crash hitbox (matches the ship body)
 @export var near_miss_size: Vector3 = Vector3(16.0, 12.0, 14.0)  ## "danger bubble" around the ship (spec §7.5)
 
-@export_group("Boost economy")
-@export var boost_capacity: float = 4.0           ## tank size = seconds of boost at a full meter
-@export var boost_start_fraction: float = 0.5     ## fraction of the tank you start a run with (0..1)
-@export var boost_drain: float = 1.0              ## fuel-seconds spent per second of boosting (1.0 = a full tank lasts boost_capacity s)
-@export var boost_regen: float = 0.6             ## fuel-seconds refilled per second while NOT boosting (the gradual accumulation)
-@export var boost_gain_per_near_miss: float = 0.6  ## bonus fuel-seconds added per near-miss (risk/reward, on top of regen)
-
 ## 1-indexed physics layer obstacles live on (matches city_chunk.gd / project.godot).
 const OBSTACLE_LAYER := 2
 
-## Emitted every physics frame. ratio is 0 at the run's start speed, 1 at full boost.
-signal speed_changed(speed: float, ratio: float, boosting: bool)
+## Emitted every physics frame. ratio is 0 at min_speed, 1 at max_speed; `accelerating` = throttling up.
+signal speed_changed(speed: float, ratio: float, accelerating: bool)
 ## Emitted once per obstacle that enters the near-miss bubble without a crash (spec §7.5).
 signal near_miss
 ## Emitted once when the ship crashes.
 signal crashed
 
-var _speed_floor: float = 0.0
 var _forward_speed: float = 0.0
-var _boost_blend: float = 0.0
-var _boost_meter: float = 0.0
 var _steer: Vector2 = Vector2.ZERO
 var _model: Node3D
 var _alive: bool = true
@@ -73,9 +63,7 @@ var _near_now: Dictionary = {}   ## instance_id -> true for obstacles currently 
 
 
 func _ready() -> void:
-	_speed_floor = base_speed
-	_forward_speed = base_speed
-	_boost_meter = clampf(boost_start_fraction, 0.0, 1.0) * boost_capacity
+	_forward_speed = clampf(base_speed, min_speed, max_speed)
 	_ensure_visual_and_collision()
 	_build_queries()
 
@@ -84,22 +72,15 @@ func _physics_process(delta: float) -> void:
 	if not _alive:
 		return
 
-	# Ramp the speed floor across the run, then ease boost on top of it. Boosting is gated by
-	# the boost meter — hold the action AND have fuel. The tank (measured in seconds of boost,
-	# boost_capacity) drains while boosting and refills GRADUALLY while you're not; near-misses
-	# add a bonus chunk on top (the risk/reward economy, spec §5.3).
-	_speed_floor = minf(_speed_floor + ramp_per_second * delta, max_speed)
-	var boosting: bool = Input.is_action_pressed(&"boost") and _boost_meter > 0.0
-	if boosting:
-		_boost_meter = maxf(0.0, _boost_meter - boost_drain * delta)
-	else:
-		_boost_meter = minf(boost_capacity, _boost_meter + boost_regen * delta)
-	# Ease the boost blend with framerate-independent smoothing. The OUT rate is slower than the
-	# IN rate, so releasing boost bleeds the speed off gradually instead of dropping it sharply.
-	var blend_target: float = 1.0 if boosting else 0.0
-	var blend_rate: float = boost_in_rate if boosting else boost_out_rate
-	_boost_blend = lerpf(_boost_blend, blend_target, 1.0 - exp(-blend_rate * delta))
-	_forward_speed = _speed_floor * lerpf(1.0, boost_multiplier, _boost_blend)
+	# THROTTLE + INERTIA. Speed is a held state: `accelerate` adds, `decelerate` bleeds, and with
+	# neither held the engine simply MAINTAINS the current speed (no auto-ramp, no drag). Holding
+	# both nets the difference. Clamped to [min_speed, max_speed].
+	var accel_in: float = Input.get_action_strength(&"accelerate")
+	var decel_in: float = Input.get_action_strength(&"decelerate")
+	_forward_speed += (accel_in * accelerate_rate - decel_in * decelerate_rate) * delta
+	_forward_speed = clampf(_forward_speed, min_speed, max_speed)
+	# 3rd signal arg = "actively throttling up" — drives the speed-up juice (FX / shake / whoosh).
+	var accelerating: bool = accel_in > decel_in
 
 	# Smooth raw input toward target for a weighty-but-responsive feel (framerate independent).
 	var target := Vector2(
@@ -108,17 +89,17 @@ func _physics_process(delta: float) -> void:
 	)
 	_steer = _steer.lerp(target, 1.0 - exp(-steer_sharpness * delta))
 
-	# Compose velocity: constant forward (−Z) + steering on X / Y. Vertical (climb/dive) speed
-	# scales with forward speed so faster flight = steeper climbs, with vertical_speed as a floor
-	# that keeps low-speed manoeuvring responsive.
-	var vert: float = maxf(vertical_speed, _forward_speed * vertical_speed_fraction)
+	# Compose velocity: held forward (−Z) + steering on X / Y. Climb/dive speed is the forward speed
+	# projected at climb_angle_deg (vertical = forward × tan θ), so 45° climbs as fast as you fly.
+	# The angle is clamped just under 90° to keep tan finite.
+	var vert: float = _forward_speed * tan(deg_to_rad(clampf(climb_angle_deg, 0.0, 89.0)))
 	velocity = Vector3(_steer.x * lateral_speed, _steer.y * vert, -_forward_speed)
 	move_and_slide()
 
 	_clamp_to_corridor()
 	_bank_model(delta)
 	_check_obstacles()
-	speed_changed.emit(_forward_speed, get_speed_ratio(), boosting)
+	speed_changed.emit(_forward_speed, get_speed_ratio(), accelerating)
 
 
 func get_speed() -> float:
@@ -130,31 +111,24 @@ func get_vertical_speed() -> float:
 	return velocity.y
 
 
-## Absolute top forward speed (m/s) reachable (ramp ceiling × boost). HUD horizontal-bar scale.
+## Absolute top forward speed (m/s) reachable. HUD horizontal-bar scale.
 func get_top_speed() -> float:
-	return max_speed * boost_multiplier
+	return max_speed
 
 
 ## Top vertical speed (m/s) reachable at full forward speed. HUD V-SPD bar scale.
 func get_max_vertical_speed() -> float:
-	return maxf(vertical_speed, get_top_speed() * vertical_speed_fraction)
+	return max_speed * tan(deg_to_rad(clampf(climb_angle_deg, 0.0, 89.0)))
 
 
-## 0..1 fraction of the tank remaining (fuel-seconds / capacity). Drives the HUD bar.
+## 0..1 throttle position (current speed across the min→max range). Drives the HUD throttle bar.
 func get_boost_meter() -> float:
-	return _boost_meter / maxf(boost_capacity, 0.001)
+	return clampf((_forward_speed - min_speed) / maxf(max_speed - min_speed, 0.001), 0.0, 1.0)
 
 
-## Add fuel to the boost tank (called on a near-miss). amount is in fuel-seconds.
-func add_boost(amount: float) -> void:
-	_boost_meter = clampf(_boost_meter + amount, 0.0, boost_capacity)
-
-
-## 0 at the run's starting speed, 1 at fully boosted top speed. Drives camera FOV, speed
-## lines, audio pitch, etc.
+## 0 at min_speed, 1 at max_speed. Drives camera FOV, speed lines, audio pitch, etc.
 func get_speed_ratio() -> float:
-	var top: float = max_speed * boost_multiplier
-	return clampf((_forward_speed - base_speed) / maxf(top - base_speed, 0.001), 0.0, 1.0)
+	return clampf((_forward_speed - min_speed) / maxf(max_speed - min_speed, 0.001), 0.0, 1.0)
 
 
 func crash() -> void:
@@ -228,9 +202,9 @@ func _bank_model(delta: float) -> void:
 		return
 	# Roll into lateral turns, pitch into vertical movement. The sign flips are exposed
 	# (invert_pitch / invert_bank) so the nose pitches UP on a climb and strafes bank the way
-	# that feels right — tune in settings.cfg [ship].
+	# that feels right — both directions corrected. Tune in settings.cfg [ship].
 	var pitch_sign: float = 1.0 if invert_pitch else -1.0
-	var bank_sign: float = 1.0 if invert_bank else -1.0
+	var bank_sign: float = -1.0 if invert_bank else 1.0
 	var target_rot := Vector3(
 		deg_to_rad(pitch_sign * _steer.y * pitch_angle_deg),
 		0.0,
