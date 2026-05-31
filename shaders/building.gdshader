@@ -25,7 +25,10 @@ float hash21(vec2 p) {
 
 void vertex() {
 	v_wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	v_wnormal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	// Use the normal matrix (inverse-transpose of the model basis): under the heavy NON-UNIFORM scale
+	// of a tall/thin/tapered tower, transforming the normal by MODEL_MATRIX skews it toward vertical,
+	// which made `wallness` below cull the windows off round/tapered buildings. This keeps it correct.
+	v_wnormal = normalize(MODEL_NORMAL_MATRIX * NORMAL);
 	v_tint = COLOR.rgb;
 }
 

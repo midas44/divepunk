@@ -38,10 +38,10 @@ enum {SHP_BOX, SHP_ROUND, SHP_PRISM, SHP_TAPER}   ## index order MUST match _get
 
 @export_group("Buildings")
 @export var columns_per_side: int = 3            ## building columns stacked outward from the corridor
-@export var rows_per_chunk: int = 8              ## building slots along the chunk's length, per column (÷world_scale)
-@export var column_spacing: float = 60.0         ## X step between columns (×world_scale); columns are anchored by their inner face and step outward
+@export var rows_per_chunk: int = 5              ## building slots along the chunk's length, per column (÷world_scale) — lower = sparser
+@export var column_spacing: float = 70.0         ## X step between columns (×world_scale); columns are anchored by their inner face and step outward
 @export var edge_margin: float = 12.0            ## clear gap (m) kept between the corridor wall and the nearest building face
-@export_range(0.0, 1.0) var fill_chance: float = 0.86   ## per-slot chance of a building (gaps add variety)
+@export_range(0.0, 1.0) var fill_chance: float = 0.6    ## per-slot chance of a building (gaps add variety; lower = sparser)
 @export_range(0.0, 1.0) var cell_depth_jitter: float = 0.35
 @export var world_scale: float = 1.0   ## set by ChunkManager; >1 enlarges buildings + spacing around the constant-size car (1.0 = original)
 @export var building_windows: bool = true   ## procedural neon-window shader (set by ChunkManager from [fx] building_windows); false = flat emissive boxes
@@ -51,20 +51,20 @@ enum {SHP_BOX, SHP_ROUND, SHP_PRISM, SHP_TAPER}   ## index order MUST match _get
 ## of mostly LOW/MID with rare MEGA towers reads far more interesting than a uniform wall. Heights and
 ## footprints are metres BEFORE [game] scale — the layout multiplies them by world_scale like the rest
 ## of the city, so at scale 2.0 a mega tower is roughly twice these numbers tall.
-@export var low_weight: float = 0.42
+@export var low_weight: float = 0.50
 @export var mid_weight: float = 0.38
-@export var high_weight: float = 0.14
-@export var mega_weight: float = 0.06     ## rare; megatowers are also kept off the corridor-edge column
+@export var high_weight: float = 0.08
+@export var mega_weight: float = 0.04     ## rare; megatowers are also kept off the corridor-edge column
 @export var low_height: Vector2 = Vector2(30.0, 80.0)
 @export var mid_height: Vector2 = Vector2(80.0, 200.0)
 @export var high_height: Vector2 = Vector2(200.0, 420.0)
 @export var mega_height: Vector2 = Vector2(420.0, 880.0)
-@export var low_footprint: Vector2 = Vector2(22.0, 60.0)
-@export var mid_footprint: Vector2 = Vector2(26.0, 75.0)
-@export var high_footprint: Vector2 = Vector2(32.0, 95.0)
-@export var mega_footprint: Vector2 = Vector2(50.0, 140.0)
-@export var footprint_aspect_min: float = 0.72   ## per-axis spread on the footprint, so towers vary in proportion (square / oblong / slab), not just size
-@export var footprint_aspect_max: float = 1.35
+@export var low_footprint: Vector2 = Vector2(35.0, 95.0)
+@export var mid_footprint: Vector2 = Vector2(45.0, 130.0)
+@export var high_footprint: Vector2 = Vector2(60.0, 175.0)
+@export var mega_footprint: Vector2 = Vector2(95.0, 260.0)
+@export var footprint_aspect_min: float = 0.65   ## per-axis spread on the footprint, so towers vary in proportion (square / oblong / slab) — wide range = huge variety
+@export var footprint_aspect_max: float = 1.6
 
 @export_group("Building shapes")
 ## Silhouette mix. Each non-empty shape is one extra MultiMesh per chunk (one draw call), so a 0 weight
