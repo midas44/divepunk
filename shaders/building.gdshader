@@ -8,9 +8,9 @@ shader_type spatial;
 uniform float window_size_v = 4.0;    // vertical metres per window row
 uniform float window_size_h = 5.0;    // horizontal metres per window column
 uniform float window_margin = 0.16;   // dark mullion around each pane (0..0.5)
-uniform float lit_fraction = 0.65;    // fraction of windows that are lit (rest dark)
-uniform float emission_boost = 3.2;   // neon emission strength (drives the bloom)
-uniform float base_emission = 0.10;   // dim body glow so towers aren't pure black
+uniform float lit_fraction = 0.35;    // fraction of windows that are lit (rest dark)
+uniform float emission_boost = 2.0;   // neon emission strength (drives the bloom)
+uniform float base_emission = 0.05;   // dim body glow so towers aren't pure black
 uniform float windows_on = 1.0;
 
 varying vec3 v_wpos;
@@ -51,7 +51,7 @@ void fragment() {
 	float windows = pane * lit * bright * wallness;
 
 	float emit = mix(base_emission, max(windows, base_emission * 0.4), windows_on);
-	ALBEDO = v_tint * 0.18;
+	ALBEDO = v_tint * 0.10;
 	METALLIC = 0.0;
 	ROUGHNESS = 0.6;
 	EMISSION = neon * emit * emission_boost;

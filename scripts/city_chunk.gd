@@ -183,7 +183,7 @@ func _ensure_multimesh() -> void:
 	_mm = MultiMesh.new()
 	_mm.transform_format = MultiMesh.TRANSFORM_3D
 	_mm.use_colors = true                   # must be set before instance_count; feeds the shader's COLOR
-	_mm.mesh = _get_building_mesh(building_windows)
+	_mm.mesh = _get_building_mesh(building_windows, world_scale)
 	_mmi.multimesh = _mm
 
 
@@ -230,15 +230,21 @@ func _mix_seed(base_seed: int, idx: int, salt: int) -> int:
 ## MultiMesh feeds the per-building hue through COLOR; the shader turns it into lit windows. Cached
 ## statically, so `windows` is resolved once (it's a global [fx] toggle — every chunk passes the
 ## same value). windows = false leaves a flat dim emissive body.
-static func _get_building_mesh(windows: bool) -> BoxMesh:
+static func _get_building_mesh(windows: bool, p_world_scale: float) -> BoxMesh:
 	if _building_mesh == null:
 		var mesh := BoxMesh.new()
 		mesh.size = Vector3.ONE
 		var mat := ShaderMaterial.new()
 		mat.shader = BUILDING_SHADER
-		mat.set_shader_parameter("windows_on", 1.0 if windows else 0.0)
 		mesh.material = mat
 		_building_mesh = mesh
+	# Re-applied every call (mesh + material are shared/cached). The window panes are a WORLD-space
+	# grid, so multiply the base pane size by world_scale to keep windows proportional to the
+	# enlarged towers instead of staying a constant 4x5 m (tiny once [game] scale grows the city).
+	var m := _building_mesh.material as ShaderMaterial
+	m.set_shader_parameter("windows_on", 1.0 if windows else 0.0)
+	m.set_shader_parameter("window_size_v", 4.0 * p_world_scale)
+	m.set_shader_parameter("window_size_h", 5.0 * p_world_scale)
 	return _building_mesh
 
 
