@@ -402,7 +402,10 @@ func _build_environment() -> Environment:
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.10, 0.12, 0.22)
 	env.fog_density = float(_cfg_value("fx", "fog_density", 0.00018))
-	env.fog_sky_affect = 0.7
+	# Keep the fog OFF the sky (low sky_affect): at 0.7 it flattened the horizon glow + clouds toward
+	# the dark fog colour, which read as "just darkness" above the rooftops. A little blends the far
+	# building tops into the horizon without killing the sky.
+	env.fog_sky_affect = float(_cfg_value("fx", "fog_sky_affect", 0.15))
 	env.fog_aerial_perspective = 0.4
 
 	# Volumetric fog — the real mood layer (desktop): a faint neon-tinted haze with true depth.

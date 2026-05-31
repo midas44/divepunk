@@ -6,14 +6,17 @@ shader_type sky;
 // long view some "landscape" above the rooftops. Built in code by game.gd; a few
 // uniforms are driven from settings.cfg [fx]. Procedural noise only — no textures.
 
-uniform vec3 zenith_color : source_color = vec3(0.010, 0.012, 0.035);
-uniform vec3 horizon_color : source_color = vec3(0.10, 0.05, 0.20);
-uniform vec3 glow_color : source_color = vec3(0.28, 0.10, 0.45);   // neon band sitting on the horizon
-uniform float horizon_falloff = 7.0;                               // higher = the glow hugs the horizon more tightly
-uniform float sky_energy = 0.9;
+// Colours are deliberately bright here: ACES tonemapping (white point 6.0) + the eye adapting to
+// the neon city crushes dim values to black, so a "night sky" still needs healthy absolute values.
+// sky_energy is the master brightness multiplier (driven from settings.cfg [fx] sky_energy).
+uniform vec3 zenith_color : source_color = vec3(0.030, 0.040, 0.110);   // overhead — visible deep night-blue, NOT black
+uniform vec3 horizon_color : source_color = vec3(0.20, 0.10, 0.34);
+uniform vec3 glow_color : source_color = vec3(0.55, 0.22, 0.80);   // neon band sitting on the horizon (distant-city glow)
+uniform float horizon_falloff = 3.5;                              // lower = the glow spreads higher up the dome (more visible above rooftops)
+uniform float sky_energy = 1.5;
 
-uniform vec3 cloud_color : source_color = vec3(0.16, 0.14, 0.26);
-uniform vec3 cloud_lit_color : source_color = vec3(0.45, 0.22, 0.55);  // undersides catching the neon
+uniform vec3 cloud_color : source_color = vec3(0.22, 0.20, 0.34);
+uniform vec3 cloud_lit_color : source_color = vec3(0.60, 0.32, 0.72);  // undersides catching the neon
 uniform float cloud_coverage = 0.5;   // 0 = clear, 1 = overcast
 uniform float cloud_density = 1.0;
 uniform float cloud_scale = 2.2;
