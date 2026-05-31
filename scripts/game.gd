@@ -16,6 +16,7 @@ const GameOverScene := preload("res://scenes/ui/GameOver.tscn")
 const HUDScene := preload("res://scenes/ui/HUD.tscn")
 const TrafficManagerScript := preload("res://scripts/traffic.gd")  # preloaded (not referenced by class_name) so game.gd parses before the global class cache knows TrafficManager
 const ScreenFXScript := preload("res://scripts/screen_fx.gd")     # same reason — preload, type the holder as CanvasLayer
+const SKY_SHADER := preload("res://shaders/sky.gdshader")         # procedural neon cloud sky (M4 view pass)
 
 @export_group("Juice")
 @export var shake_on_near_miss: float = 0.25
@@ -366,19 +367,11 @@ func _ensure_environment() -> void:
 func _build_environment() -> Environment:
 	var env := Environment.new()
 
-	# Dark night sky with a faint neon band along the horizon = distant city glow (spec §7.7).
-	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.01, 0.01, 0.03)
-	sky_mat.sky_horizon_color = Color(0.07, 0.03, 0.12)
-	sky_mat.sky_curve = 0.12
-	sky_mat.sky_energy_multiplier = 0.6
-	sky_mat.ground_bottom_color = Color(0.01, 0.01, 0.02)
-	sky_mat.ground_horizon_color = Color(0.06, 0.02, 0.10)
-	sky_mat.ground_energy_multiplier = 0.3
-	var sky := Sky.new()
-	sky.sky_material = sky_mat
+	# Neon-night sky: a procedural drifting-cloud sky (shader) with a glowing horizon band, or a
+	# plain dark sky + horizon band as a cheaper fallback (see _build_sky()). Ambient + reflections
+	# are sourced from it below, so the towers sit in a coherent night.
 	env.background_mode = Environment.BG_SKY
-	env.sky = sky
+	env.sky = _build_sky()
 
 	# Ambient + reflections come from the (dark) sky so matte surfaces stay moody and the neon pops.
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -435,6 +428,31 @@ func _build_environment() -> Environment:
 	env.adjustment_saturation = float(_cfg_value("fx", "saturation", 1.22))
 
 	return env
+
+
+## Builds the sky resource: a procedural neon cloud sky (custom shader) when [fx] sky_clouds is on,
+## else a plain ProceduralSkyMaterial (dark sky + neon horizon band, no clouds — cheaper). If the
+## shader ever fails to compile (GPU only — headless can't), set sky_clouds=false to fall back.
+func _build_sky() -> Sky:
+	var sky := Sky.new()
+	if bool(_cfg_value("fx", "sky_clouds", true)):
+		var mat := ShaderMaterial.new()
+		mat.shader = SKY_SHADER
+		mat.set_shader_parameter(&"sky_energy", float(_cfg_value("fx", "sky_energy", 0.9)))
+		mat.set_shader_parameter(&"cloud_coverage", float(_cfg_value("fx", "cloud_coverage", 0.5)))
+		mat.set_shader_parameter(&"cloud_speed", float(_cfg_value("fx", "cloud_speed", 0.006)))
+		sky.sky_material = mat
+		return sky
+	var sky_mat := ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.01, 0.01, 0.03)
+	sky_mat.sky_horizon_color = Color(0.09, 0.05, 0.16)
+	sky_mat.sky_curve = 0.12
+	sky_mat.sky_energy_multiplier = 0.8
+	sky_mat.ground_bottom_color = Color(0.01, 0.01, 0.02)
+	sky_mat.ground_horizon_color = Color(0.07, 0.03, 0.12)
+	sky_mat.ground_energy_multiplier = 0.4
+	sky.sky_material = sky_mat
+	return sky
 
 
 func _register_input() -> void:
