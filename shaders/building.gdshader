@@ -21,15 +21,25 @@ uniform float base_emission = 0.02;    // tiny body glow so unlit towers aren't 
 uniform vec3 wall_color : source_color = vec3(0.012, 0.013, 0.020);  // DARK concrete/glass body
 uniform float windows_on = 1.0;
 
+// --- Chaotic per-window flicker -------------------------------------------------------------------
+// A small share of windows change over time — switching on, switching off, or just shifting brightness
+// — each on its own slow, phase-offset clock so the skyline never blinks in unison. Realistically rare:
+// most windows hold their state forever; only `flicker_fraction` of them are ever volatile, and each of
+// those re-rolls only every several seconds.
+uniform float flicker_fraction = 0.07;  // share of windows that ever change (0 = fully static city)
+uniform float flicker_rate = 0.13;      // baseline state-changes per second for a volatile window
+
 // Per-building window grid presets: (metresH, metresV, marginH, marginV). The margins are the dark
 // mullion fraction (0..0.5) around each pane. grid_class (0..1) picks one, so window size AND aspect
 // vary between towers — dense office panes, tall slots, wide ribbons, big loft glass.
+// Pane H/V are halved from the original presets so windows stay modest on the larger WorldScale=4 city
+// (final pane metres = these × window_scale); margins are fractions, so they're unchanged.
 const vec4 GRID[5] = vec4[](
-	vec4(4.5, 3.4, 0.20, 0.22),   // 0 — dense small office panes
-	vec4(5.6, 4.1, 0.16, 0.18),   // 1 — standard
-	vec4(3.1, 5.8, 0.26, 0.12),   // 2 — tall narrow slots
-	vec4(8.6, 3.2, 0.10, 0.22),   // 3 — wide horizontal ribbon
-	vec4(7.2, 6.4, 0.08, 0.08)    // 4 — big loft glass
+	vec4(2.25, 1.70, 0.20, 0.22),   // 0 — dense small office panes
+	vec4(2.80, 2.05, 0.16, 0.18),   // 1 — standard
+	vec4(1.55, 2.90, 0.26, 0.12),   // 2 — tall narrow slots
+	vec4(4.30, 1.60, 0.10, 0.22),   // 3 — wide horizontal ribbon
+	vec4(3.60, 3.20, 0.08, 0.08)    // 4 — big loft glass
 );
 
 varying vec3 v_wpos;
@@ -49,6 +59,18 @@ vec3 hsv2rgb(vec3 c) {
 	vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
 	vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
 	return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+// Per-window brightness from two hashes + the building's `variation`. The baseline is low (most lit
+// windows glow softly; only a few blaze and bloom); `variation` widens the spread so residential towers
+// mix a handful of bright windows with many near-dark ones, and a second hash dims further so even a
+// uniform office never reads as a flat bright panel. Shared by the static and the flickering paths.
+float win_bright(float rb, float rb2, float variation) {
+	float base = mix(0.46, 0.26, variation);
+	float spread = mix(0.42, 0.90, variation);
+	float b = base + (rb - 0.5) * spread;
+	b *= 0.42 + 0.45 * rb2;
+	return clamp(b, 0.025, 1.0);
 }
 
 void vertex() {
@@ -110,17 +132,32 @@ void fragment() {
 	float r_temp = hash21(id + vec2(33.0, 11.0));
 	float r_acc  = hash21(id + vec2(53.0, 29.0));
 
+	// STATIC look — the vast majority of windows hold a fixed lit state and brightness.
 	float lit = step(1.0 - lit_frac, r_lit);
+	float bri = win_bright(r_bri, r_bri2, variation);
 
-	// Dimmer + chaotic per-window brightness. The baseline is low (most lit windows glow softly, only a
-	// few blaze and bloom); `variation` widens the spread so residential towers mix a handful of bright
-	// windows with many near-dark ones. A second hash dims further, so even a uniform office never reads
-	// as a flat bright panel.
-	float base = mix(0.46, 0.26, variation);
-	float spread = mix(0.42, 0.90, variation);
-	float bri = base + (r_bri - 0.5) * spread;
-	bri *= 0.42 + 0.45 * r_bri2;
-	bri = clamp(bri, 0.025, 1.0);
+	// CHAOTIC FLICKER — a small share of windows (`flicker_fraction`) instead run a slow private clock and
+	// re-roll their lit state AND brightness each tick, cross-fading the switch over a fraction of a second.
+	// A flip between differing lit states reads as a light switching on or off; a flip while both ticks are
+	// lit reads as a brightness change. Per-window phase + rate jitter keep the changes scattered in time,
+	// never synchronised. Because each tick is lit with probability `lit_frac` just like the static path,
+	// the overall fraction of windows alight stays put — the city doesn't drift brighter or darker.
+	float r_vol = hash21(id + vec2(67.0, 23.0));
+	if (r_vol < flicker_fraction) {
+		float r_phase = hash21(id + vec2(83.0, 47.0));
+		float r_rate  = hash21(id + vec2(13.0, 71.0));
+		float clock = TIME * flicker_rate * (0.6 + 0.8 * r_rate) + r_phase * 90.0;
+		float ep = floor(clock);
+		float fade = smoothstep(0.0, 0.10, fract(clock));   // quick flip in the first tenth of each tick
+		vec2 jc = vec2(ep) * 1.7;            // current tick's hash offset
+		vec2 jp = vec2(ep - 1.0) * 1.7;      // previous tick's
+		float lit_c = step(1.0 - lit_frac, hash21(id + vec2(7.0, 3.0) + jc));
+		float lit_p = step(1.0 - lit_frac, hash21(id + vec2(7.0, 3.0) + jp));
+		float bri_c = win_bright(hash21(id + vec2(19.0, 5.0) + jc), hash21(id + vec2(41.0, 17.0) + jc), variation);
+		float bri_p = win_bright(hash21(id + vec2(19.0, 5.0) + jp), hash21(id + vec2(41.0, 17.0) + jp), variation);
+		lit = mix(lit_p, lit_c, fade);
+		bri = mix(bri_p, bri_c, fade);
+	}
 
 	// Colour: most windows are the building's white base, lightly jittered warm/cool per window by
 	// `variation`. A minority (`accent_amt`) are recoloured to a saturated neon hue — colour pops sitting
