@@ -15,6 +15,7 @@ const ChunkManagerScene := preload("res://scenes/world/ChunkManager.tscn")
 const GameOverScene := preload("res://scenes/ui/GameOver.tscn")
 const HUDScene := preload("res://scenes/ui/HUD.tscn")
 const TrafficManagerScript := preload("res://scripts/traffic.gd")  # preloaded (not referenced by class_name) so game.gd parses before the global class cache knows TrafficManager
+const ScreenFXScript := preload("res://scripts/screen_fx.gd")     # same reason — preload, type the holder as CanvasLayer
 
 @export_group("Juice")
 @export var shake_on_near_miss: float = 0.25
@@ -24,6 +25,7 @@ var _ship: CharacterBody3D
 var _rig: Node3D
 var _mgr: ChunkManager
 var _traffic: Node3D
+var _fx: CanvasLayer
 var _game_over: GameOverScreen
 var _hud: HUD
 
@@ -36,6 +38,7 @@ func _ready() -> void:
 	_spawn_world()
 	_spawn_traffic()
 	_spawn_ui()
+	_spawn_screen_fx()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -88,6 +91,8 @@ func _spawn_ship_and_camera() -> void:
 		_ship.crashed.connect(_on_ship_crashed)
 	if _ship.has_signal(&"near_miss"):
 		_ship.near_miss.connect(_on_ship_near_miss)
+	if _ship.has_signal(&"speed_changed"):
+		_ship.speed_changed.connect(_on_ship_speed_changed)
 
 
 ## Spawns the M2 streaming city around the ship. World seed + debug flags come from the
@@ -147,7 +152,28 @@ func _spawn_ui() -> void:
 
 	_game_over = GameOverScene.instantiate() as GameOverScreen
 	_game_over.name = "GameOver"
+	_game_over.layer = 100   # above the screen-FX (30) and HUD (50) layers so it's never distorted
 	add_child(_game_over)
+
+
+## Spawns the fullscreen screen-FX layer (speed lines + chromatic aberration/vignette). Toggles
+## come from settings.cfg [fx]; it's fed the ship's speed via the speed_changed signal.
+func _spawn_screen_fx() -> void:
+	if get_node_or_null(^"ScreenFX") != null:
+		return
+	_fx = ScreenFXScript.new()
+	_fx.name = "ScreenFX"
+	_fx.speed_lines_enabled = bool(_cfg_value("fx", "speed_lines", true))
+	_fx.speed_lines_strength = float(_cfg_value("fx", "speed_lines_strength", 1.0))
+	_fx.post_enabled = bool(_cfg_value("fx", "chromatic_aberration", true))
+	add_child(_fx)
+
+
+## Forwards the ship's per-frame speed to the screen-FX layer (speed lines + aberration ramp).
+func _on_ship_speed_changed(_speed: float, ratio: float, boosting: bool) -> void:
+	if _fx != null:
+		_fx.set_speed_ratio(ratio)
+		_fx.set_boost(boosting)
 
 
 func _process(_delta: float) -> void:
