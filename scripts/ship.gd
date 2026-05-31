@@ -26,8 +26,8 @@ extends CharacterBody3D
 @export var lateral_speed: float = 45.0     ## max sideways speed (m/s)
 @export var climb_angle_deg: float = 45.0   ## climb/dive steepness: vertical speed = forward_speed × tan(this). 45° climbs as fast as you fly; 0° = no vertical; clamped under 90°
 @export var steer_sharpness: float = 8.0    ## higher = snappier, lower = floatier
-@export var bank_angle_deg: float = 35.0    ## visual roll into turns (pure juice)
-@export var pitch_angle_deg: float = 15.0   ## visual pitch on climb / dive (pure juice)
+@export var bank_angle_deg: float = 23.0    ## visual roll into turns (pure juice) — dialled back ~1/3; fuller tilt deferred to the post-corridor pass
+@export var pitch_angle_deg: float = 10.0   ## visual pitch on climb / dive (pure juice) — dialled back ~1/3
 @export var invert_pitch: bool = true       ## true = nose pitches UP as you climb (natural arcade feel); false = the old nose-down tilt
 @export var invert_bank: bool = true        ## true = banks INTO strafes the natural way (direction corrected); false = the other roll
 @export var visual_lerp: float = 10.0       ## how fast the model banks / pitches
