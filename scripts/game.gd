@@ -20,6 +20,13 @@ const ScreenFXScript := preload("res://scripts/screen_fx.gd")     # same reason 
 @export_group("Juice")
 @export var shake_on_near_miss: float = 0.25
 @export var shake_on_crash: float = 1.0
+@export var shake_on_boost: float = 0.35            ## camera punch the moment a boost kicks in
+@export var enable_near_miss_flash: bool = true     ## screen flash on a near-miss (from [fx] near_miss_flash)
+@export var near_miss_flash_amount: float = 0.35    ## strength of that flash (0..1)
+@export var crash_flash_amount: float = 1.0         ## red flash on a crash
+@export var near_miss_time_scale: float = 0.9       ## brief slow-mo factor on a near-miss (1.0 = off; from [fx] time_dilation)
+@export var time_dilation_duration: float = 0.12    ## seconds (real time) the slow-mo holds before easing back
+@export var time_dilation_cooldown: float = 0.35    ## min real seconds between dips, so a chain can't lock slow-mo on
 
 var _ship: CharacterBody3D
 var _rig: Node3D
@@ -29,9 +36,16 @@ var _fx: CanvasLayer
 var _game_over: GameOverScreen
 var _hud: HUD
 
+var _was_boosting: bool = false
+var _td_timer: float = 0.0       ## remaining real-time slow-mo (s)
+var _td_cooldown: float = 0.0    ## remaining real-time cooldown before another dip (s)
+
 
 func _ready() -> void:
 	_register_input()
+	Engine.time_scale = 1.0   # defensive: a prior run may have left a slow-mo dip active
+	enable_near_miss_flash = bool(_cfg_value("fx", "near_miss_flash", enable_near_miss_flash))
+	near_miss_time_scale = float(_cfg_value("fx", "time_dilation", near_miss_time_scale))
 	_capture_mouse()
 	_ensure_environment()
 	_spawn_ship_and_camera()
@@ -169,11 +183,15 @@ func _spawn_screen_fx() -> void:
 	add_child(_fx)
 
 
-## Forwards the ship's per-frame speed to the screen-FX layer (speed lines + aberration ramp).
+## Forwards the ship's per-frame speed to the screen-FX layer (speed lines + aberration ramp), and
+## punches the camera the instant a boost kicks in (rising edge).
 func _on_ship_speed_changed(_speed: float, ratio: float, boosting: bool) -> void:
 	if _fx != null:
 		_fx.set_speed_ratio(ratio)
 		_fx.set_boost(boosting)
+	if boosting and not _was_boosting and _rig != null and _rig.has_method(&"add_shake"):
+		_rig.add_shake(shake_on_boost)
+	_was_boosting = boosting
 
 
 func _process(_delta: float) -> void:
@@ -181,6 +199,8 @@ func _process(_delta: float) -> void:
 	if _ship != null:
 		ScoreManager.set_distance(-_ship.global_position.z)
 	ScoreManager.tick(_delta)
+	# Ease any active near-miss slow-mo, using REAL time (recovered from the scaled frame delta).
+	_update_time_dilation(_delta / maxf(Engine.time_scale, 0.001))
 
 
 func _on_ship_near_miss() -> void:
@@ -189,6 +209,9 @@ func _on_ship_near_miss() -> void:
 		_ship.add_boost(_ship.boost_gain_per_near_miss)
 	if _rig != null and _rig.has_method(&"add_shake"):
 		_rig.add_shake(shake_on_near_miss)
+	if _fx != null and enable_near_miss_flash:
+		_fx.flash(near_miss_flash_amount, Color(0.5, 0.9, 1.0))
+	_trigger_time_dilation()
 
 
 func _on_ship_crashed() -> void:
@@ -197,8 +220,43 @@ func _on_ship_crashed() -> void:
 		% [ScoreManager.get_score(), ScoreManager.high_score, ", NEW BEST" if is_best else ""])
 	if _rig != null and _rig.has_method(&"add_shake"):
 		_rig.add_shake(shake_on_crash)
+	if _fx != null:
+		_fx.flash(crash_flash_amount, Color(1.0, 0.3, 0.2))   # red impact flash
+		_fx.set_speed_ratio(0.0)                              # kill the speed lines / aberration
+		_fx.set_boost(false)
+	_reset_time_scale()                                       # the game-over screen runs at normal speed
 	if _game_over != null:
 		_game_over.show_over(ScoreManager.get_score(), ScoreManager.high_score, is_best)
+
+
+## Brief "bullet-time" dip on a near-miss (juice, spec §5.2). Bounded by a cooldown so a fast
+## near-miss chain can't lock the game in slow-mo. near_miss_time_scale = 1.0 disables it.
+func _trigger_time_dilation() -> void:
+	if near_miss_time_scale >= 0.999 or _td_cooldown > 0.0:
+		return
+	_td_timer = time_dilation_duration
+	_td_cooldown = time_dilation_cooldown
+
+
+## Holds Engine.time_scale at the dip for its duration, then eases back to 1.0. Driven with REAL
+## delta (passed in) so its own timing is independent of the slow-mo it applies.
+func _update_time_dilation(real_delta: float) -> void:
+	if _td_cooldown > 0.0:
+		_td_cooldown = maxf(0.0, _td_cooldown - real_delta)
+	if _td_timer > 0.0:
+		_td_timer = maxf(0.0, _td_timer - real_delta)
+		Engine.time_scale = near_miss_time_scale
+	elif not is_equal_approx(Engine.time_scale, 1.0):
+		Engine.time_scale = lerpf(Engine.time_scale, 1.0, 1.0 - exp(-12.0 * real_delta))
+		if absf(Engine.time_scale - 1.0) < 0.01:
+			Engine.time_scale = 1.0
+
+
+## Snap time back to normal (on crash / before the game-over screen).
+func _reset_time_scale() -> void:
+	_td_timer = 0.0
+	_td_cooldown = 0.0
+	Engine.time_scale = 1.0
 
 
 ## Safe read from the Config autoload (falls back to the default if it isn't present).
