@@ -30,7 +30,7 @@ public partial class CityChunk : Node3D
 
 	// Building size classes and silhouettes (tuned via the "Building classes" / "Building shapes" groups).
 	private enum BuildingClass { Low = 0, Mid = 1, High = 2, Mega = 3 }
-	private enum Silhouette { Box = 0, Round = 1, Prism = 2, Taper = 3 }   // index order MUST match GetBuildingMeshes()
+	private enum Silhouette { Box = 0, Round = 1, Prism = 2, Taper = 3, Shard = 4, Sphere = 5 }   // index order MUST match GetBuildingMeshes()
 
 	// Both corridor walls, processed in this order (the RNG stream must consume them -1 then +1).
 	private static readonly float[] Sides = { -1.0f, 1.0f };
@@ -53,6 +53,12 @@ public partial class CityChunk : Node3D
 	[Export] public float WorldScale = 1.0f;             // set by ChunkManager; >1 enlarges buildings + spacing
 	[Export] public bool BuildingWindows = true;         // procedural neon-window shader; false = flat emissive boxes
 	[Export(PropertyHint.Range, "0,1")] public float SkybridgeChance = 0.35f;  // chance an adjacent same-side tower pair is linked by a skybridge
+	[Export(PropertyHint.Range, "0,1")] public float CrossSkybridgeChance = 0.22f;  // chance a row's two inner towers are linked ACROSS the corridor (a high span; kept rarer)
+	[Export(PropertyHint.Range, "0,1")] public float ZigguratChance = 0.06f;   // chance a Mid+ tower is a stepped-pyramid ziggurat instead of a plain silhouette
+	[Export(PropertyHint.Range, "0,1")] public float SphereStackChance = 0.05f;  // chance a Mid+ tower is a multi-spherical stack
+	[Export(PropertyHint.Range, "0,1")] public float ArchChance = 0.12f;       // chance this chunk grows a monumental arch ACROSS the corridor (an arc-shaped gateway)
+	[Export(PropertyHint.Range, "0,1")] public float LandingPadChance = 0.28f;   // chance a flat roof gets a landing pad
+	[Export(PropertyHint.Range, "0,1")] public float ParkedCarChance = 0.55f;    // chance a landing pad has a parked magenta flying car
 
 	[ExportGroup("Building classes")]
 	[Export] public float LowWeight = 0.50f;
@@ -75,6 +81,7 @@ public partial class CityChunk : Node3D
 	[Export] public float ShapeRoundWeight = 0.2f;
 	[Export] public float ShapePrismWeight = 0.15f;
 	[Export] public float ShapeTaperWeight = 0.15f;
+	[Export] public float ShapeShardWeight = 0.08f;      // futuristic tapered-spike "shard" silhouette
 
 	[ExportGroup("Obstacles")]
 	[Export] public int SafeChunks = 2;                  // first N chunks have no obstacles (a warm-up runway)
@@ -97,7 +104,13 @@ public partial class CityChunk : Node3D
 	private static ShaderMaterial _beaconMat;            // blinking emissive (beacon.gdshader)
 	private static CylinderMesh _spireMesh;              // pointed roof cap (cone), scaled per roof
 	private static SphereMesh _domeMesh;                 // dome roof cap, scaled per roof
+	private static Mesh _pyramidMesh;                    // square pyramid cap (box roofs)
+	private static Mesh _hexCapMesh;                     // hex pyramid cap (prism roofs)
 	private static StandardMaterial3D _structureMat;     // dark concrete/metal for rooftop caps
+	private static Mesh _padMesh;                        // flat landing-pad disc, scaled per roof
+	private static Mesh _carMesh;                        // parked flying-car body
+	private static StandardMaterial3D _padMat;           // glowing helipad
+	private static StandardMaterial3D _carMat;           // magenta parked car
 
 	public int Index = 0;
 	private List<MultiMesh> _mms = new();                // one per silhouette, index-aligned with _mmis
@@ -111,6 +124,14 @@ public partial class CityChunk : Node3D
 	private MultiMeshInstance3D _spireMmi;
 	private MultiMesh _domeMm;                            // rooftop domes for the whole chunk
 	private MultiMeshInstance3D _domeMmi;
+	private MultiMesh _pyramidMm;                         // rooftop pyramids (box towers)
+	private MultiMeshInstance3D _pyramidMmi;
+	private MultiMesh _hexCapMm;                          // rooftop hex pyramids (prism towers)
+	private MultiMeshInstance3D _hexCapMmi;
+	private MultiMesh _padMm;                             // rooftop landing pads
+	private MultiMeshInstance3D _padMmi;
+	private MultiMesh _carMm;                             // parked flying cars
+	private MultiMeshInstance3D _carMmi;
 
 	public override void _Ready()
 	{
@@ -175,6 +196,10 @@ public partial class CityChunk : Node3D
 		UploadTransforms(_antennaMm, _antennaMmi, layout.Antennas);
 		UploadTransforms(_spireMm, _spireMmi, layout.Spires);
 		UploadTransforms(_domeMm, _domeMmi, layout.Domes);
+		UploadTransforms(_pyramidMm, _pyramidMmi, layout.Pyramids);
+		UploadTransforms(_hexCapMm, _hexCapMmi, layout.HexCaps);
+		UploadTransforms(_padMm, _padMmi, layout.Pads);
+		UploadTransforms(_carMm, _carMmi, layout.ParkedCars);
 	}
 
 	// Pushes a flat list of transforms into a MultiMesh and toggles its instance visible/empty.
@@ -189,9 +214,11 @@ public partial class CityChunk : Node3D
 	// Deterministically computes this chunk's buildings (no rendering side effects, so it's unit-testable
 	// headless where MultiMesh readback isn't). Per kept building the RNG stream consumes, in order:
 	// class, footprint (base + 2 aspects), height, yaw, x-jitter, z-jitter, shape, window profile
-	// (accent hue + archetype + traits), then the roof-feature draws (mast/beacon/cap, see
-	// AddRoofFeatures); a final pass links some adjacent towers with skybridges. The builders salt (0)
-	// keeps this independent of the obstacle stream (1), so tuning one never reshuffles the other.
+	// (accent hue + archetype + traits), a building-form roll (plain / ziggurat / sphere-stack), then the
+	// roof-feature draws (mast / beacon / shape-matched cap / landing pad, see AddRoofFeatures). Final
+	// passes link towers with skybridges (same-side, then across the corridor) and grow the odd arc-shaped
+	// gateway. The builders salt (0) keeps this independent of the obstacle stream (1), so tuning one
+	// never reshuffles the other.
 	public BuildingLayout ComputeBuildingLayout(long baseSeed, int pIndex, float diff)
 	{
 		var rng = new RandomNumberGenerator();
@@ -210,6 +237,10 @@ public partial class CityChunk : Node3D
 			Beacons = new List<Transform3D>(),
 			Spires = new List<Transform3D>(),
 			Domes = new List<Transform3D>(),
+			Pyramids = new List<Transform3D>(),
+			HexCaps = new List<Transform3D>(),
+			Pads = new List<Transform3D>(),
+			ParkedCars = new List<Transform3D>(),
 		};
 
 		// Track placed towers (by side/column/row) so the skybridge pass below can link neighbours.
@@ -217,7 +248,7 @@ public partial class CityChunk : Node3D
 		var lookup = new Dictionary<(int, int, int), PlacedBuilding>();
 
 		float classTotal = Mathf.Max(LowWeight, 0.0f) + Mathf.Max(MidWeight, 0.0f) + Mathf.Max(HighWeight, 0.0f) + Mathf.Max(MegaWeight, 0.0f);
-		float shapeTotal = Mathf.Max(ShapeBoxWeight, 0.0f) + Mathf.Max(ShapeRoundWeight, 0.0f) + Mathf.Max(ShapePrismWeight, 0.0f) + Mathf.Max(ShapeTaperWeight, 0.0f);
+		float shapeTotal = Mathf.Max(ShapeBoxWeight, 0.0f) + Mathf.Max(ShapeRoundWeight, 0.0f) + Mathf.Max(ShapePrismWeight, 0.0f) + Mathf.Max(ShapeTaperWeight, 0.0f) + Mathf.Max(ShapeShardWeight, 0.0f);
 
 		foreach (float side in Sides)
 		{
@@ -250,30 +281,55 @@ public partial class CityChunk : Node3D
 					float z = -((float)row + 0.5f) * rowSpacing
 						+ rng.RandfRange(-rowSpacing, rowSpacing) * CellDepthJitter;
 					Silhouette shape = PickShape(rng, shapeTotal);
-					Basis basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx, height, fz));
-					layout.Transforms.Add(new Transform3D(basis, new Vector3(x, height * 0.5f, z)));
-					layout.Shapes.Add((int)shape);
 
 					// Per-building window lighting profile. COLOR carries the white base + lit fraction;
 					// INSTANCE_CUSTOM carries (variation, grid class, accent hue, accent amount). The shader
 					// derives its own per-building decorrelation seed from the instance origin.
 					WindowProfile wp = PickWindowProfile(rng);
-					layout.Colors.Add(new Color(wp.Color.R, wp.Color.G, wp.Color.B, wp.LitFraction));
-					layout.Custom.Add(new Color(wp.Variation, wp.GridClass, wp.AccentHue, wp.AccentAmount));
 
-					// Rooftop dressing: mast + beacon on the tallest, and a non-flat cap (setback / spire /
-					// dome) on some roofs.
-					AddRoofFeatures(rng, layout, cls, x, z, height, fx, fz, yaw, scale);
+					// Building FORM — most towers are a single silhouette; a futuristic minority are
+					// composites (a stepped-pyramid ziggurat or a stack of spheres) emitted as several
+					// instances sharing this profile. The form decides the top piece the roof dressing caps.
+					float rForm = rng.Randf();
+					float topY = height;
+					float topFx = fx, topFz = fz;
+					Silhouette topShape = shape;
+					bool flatTop = shape != Silhouette.Shard;   // a shard tapers to a point — no flat roof
+					bool bigEnough = cls != BuildingClass.Low;
+					if (bigEnough && rForm < ZigguratChance)
+					{
+						BuildZiggurat(rng, layout, wp, x, z, height, fx, fz, yaw, out topY, out topFx, out topFz);
+						topShape = Silhouette.Box;
+						flatTop = true;
+					}
+					else if (bigEnough && rForm < ZigguratChance + SphereStackChance)
+					{
+						BuildSphereStack(rng, layout, wp, x, z, height, fx, fz, yaw, out topY, out topFx, out topFz);
+						topShape = Silhouette.Round;
+						flatTop = false;
+					}
+					else
+					{
+						Basis basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx, height, fz));
+						AddInstance(layout, (int)shape, new Transform3D(basis, new Vector3(x, height * 0.5f, z)), wp);
+					}
 
-					var pb = new PlacedBuilding { Side = side, Col = col, Row = row, X = x, Z = z, Top = height, HalfX = halfX };
+					// Rooftop dressing: mast + beacon, a cap that continues the tower's own shape, and the
+					// odd landing pad (with a parked car) on a flat roof.
+					AddRoofFeatures(rng, layout, cls, topShape, flatTop, x, z, topY, topFx, topFz, yaw, scale);
+
+					var pb = new PlacedBuilding { Side = side, Col = col, Row = row, X = x, Z = z, Top = topY, HalfX = halfX };
 					placed.Add(pb);
 					lookup[(SideIdx(side), col, row)] = pb;
 				}
 			}
 		}
 
-		// Skybridge pass — link some adjacent same-side towers (deterministic, continues the same stream).
+		// Skybridge passes — same-side neighbours, then the occasional high span ACROSS the corridor; and
+		// finally the rare arc-shaped gateway over the street (all deterministic, same builder stream).
 		BridgeBuildings(rng, layout, lookup, placed, scale);
+		BridgeAcrossCorridor(rng, layout, lookup, placed, scale);
+		MaybeBuildArch(rng, layout, scale);
 
 		return layout;
 	}
@@ -320,13 +376,16 @@ public partial class CityChunk : Node3D
 		float a = Mathf.Max(ShapeBoxWeight, 0.0f);
 		float b = a + Mathf.Max(ShapeRoundWeight, 0.0f);
 		float c = b + Mathf.Max(ShapePrismWeight, 0.0f);
+		float d = c + Mathf.Max(ShapeTaperWeight, 0.0f);
 		if (r < a)
 			return Silhouette.Box;
 		if (r < b)
 			return Silhouette.Round;
 		if (r < c)
 			return Silhouette.Prism;
-		return Silhouette.Taper;
+		if (r < d)
+			return Silhouette.Taper;
+		return Silhouette.Shard;
 	}
 
 	// Window light palette. Most windows are WHITE — cold (offices) through warm (homes) — with a
@@ -378,6 +437,10 @@ public partial class CityChunk : Node3D
 		public List<Transform3D> Beacons;
 		public List<Transform3D> Spires;
 		public List<Transform3D> Domes;
+		public List<Transform3D> Pyramids;     // square pyramids capping box towers
+		public List<Transform3D> HexCaps;      // hex pyramids capping prism towers
+		public List<Transform3D> Pads;         // rooftop landing pads
+		public List<Transform3D> ParkedCars;   // parked magenta flying cars on pads
 	}
 
 	// Picks a window archetype, then rolls its traits. Lit fractions are deliberately LOW (most windows
@@ -443,11 +506,13 @@ public partial class CityChunk : Node3D
 		return Mathf.Clamp(h + rng.RandfRange(-0.02f, 0.02f), 0.0f, 1.0f);
 	}
 
-	// Adds this building's rooftop dressing to the layout: a thin tapered mast (more likely the taller the
-	// tower), a red aviation beacon on the highest roofs, and — on some roofs — a non-flat cap: a setback
-	// penthouse (a smaller lit box, rides the building MultiMesh), a spire/cone, or a dome. Sizes scale
-	// with WorldScale so they stay proportional to the enlarged towers.
-	private void AddRoofFeatures(RandomNumberGenerator rng, BuildingLayout layout, BuildingClass cls, float x, float z, float height, float fx, float fz, float yaw, float scale)
+	// Adds this building's rooftop dressing: a thin tapered mast (likelier the taller the tower), a red
+	// aviation beacon on the highest roofs, and a non-flat cap that CONTINUES the tower's own silhouette —
+	// a pyramid tops a box, a dome/spire tops a round tower, a hex pyramid/step tops a hex prism, a
+	// spire/dome caps a taper — sized to the (top) footprint (fx,fz) and sharing its yaw so it sits flush.
+	// `flatTop` roofs that stay flat may instead get a landing pad (sometimes with a parked car). Sizes
+	// scale with WorldScale. `height`/`fx`/`fz` are the TOP piece (so composites cap their own apex).
+	private void AddRoofFeatures(RandomNumberGenerator rng, BuildingLayout layout, BuildingClass cls, Silhouette shape, bool flatTop, float x, float z, float height, float fx, float fz, float yaw, float scale)
 	{
 		float antennaChance = cls switch
 		{
@@ -475,42 +540,175 @@ public partial class CityChunk : Node3D
 			layout.Beacons.Add(new Transform3D(bb, new Vector3(x, roofTopY + bR, z)));
 		}
 
-		// Non-flat roof cap — most roofs stay flat (~58%); the rest get a setback, spire, or dome.
+		// Shape-matched roof cap — many roofs stay flat; the rest grow a cap continuing the tower's form.
 		float rCap = rng.Randf();
-		if (rCap < 0.22f)
+		bool gotCap = true;
+		switch (shape)
 		{
-			// SETBACK penthouse — a smaller lit box stepped in from the roof edge (rides the building MMI).
-			float frac = rng.RandfRange(0.40f, 0.70f);
-			float capH = Mathf.Clamp(height * rng.RandfRange(0.04f, 0.12f), 6.0f * scale, 90.0f * scale);
-			Basis cb = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx * frac, capH, fz * frac));
-			AddBoxInstance(layout, new Transform3D(cb, new Vector3(x, height + capH * 0.5f, z)), PenthouseProfile(rng));
+			case Silhouette.Box:
+				if (rCap < 0.22f)
+				{
+					// SETBACK penthouse — a smaller box stepped in from the roof edge (rides the building MMI).
+					float frac = rng.RandfRange(0.45f, 0.72f);
+					float capH = Mathf.Clamp(height * rng.RandfRange(0.04f, 0.12f), 6.0f * scale, 90.0f * scale);
+					Basis cb = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx * frac, capH, fz * frac));
+					AddInstance(layout, (int)Silhouette.Box, new Transform3D(cb, new Vector3(x, height + capH * 0.5f, z)), PenthouseProfile(rng));
+				}
+				else if (rCap < 0.40f)
+				{
+					// PYRAMID — a square hip roof matching the box footprint exactly (base = fx×fz, same yaw).
+					float capH = Mathf.Clamp(height * rng.RandfRange(0.08f, 0.20f), 8.0f * scale, 140.0f * scale);
+					Basis pb = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx, capH, fz));
+					layout.Pyramids.Add(new Transform3D(pb, new Vector3(x, height, z)));
+				}
+				else gotCap = false;
+				break;
+			case Silhouette.Round:
+				if (rCap < 0.24f)
+				{
+					// DOME — a semisphere matching the tower's top circle/ellipse (equator at the roofline).
+					float domeH = Mathf.Min(fx, fz) * rng.RandfRange(0.85f, 1.15f);
+					Basis db = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx, domeH, fz));
+					layout.Domes.Add(new Transform3D(db, new Vector3(x, height, z)));
+				}
+				else if (rCap < 0.40f)
+				{
+					// SPIRE — a smooth cone continuing the cylinder (base = the tower's top circle).
+					float spireH = Mathf.Clamp(height * rng.RandfRange(0.16f, 0.42f), 12.0f * scale, 280.0f * scale);
+					Basis sb = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx, spireH, fz));
+					layout.Spires.Add(new Transform3D(sb, new Vector3(x, height + spireH * 0.5f, z)));
+				}
+				else gotCap = false;
+				break;
+			case Silhouette.Prism:
+				if (rCap < 0.24f)
+				{
+					// HEX PYRAMID — a 6-sided cap aligned to the prism's hexagon (same radius + yaw).
+					float capH = Mathf.Clamp(height * rng.RandfRange(0.12f, 0.34f), 10.0f * scale, 220.0f * scale);
+					Basis hb = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx, capH, fz));
+					layout.HexCaps.Add(new Transform3D(hb, new Vector3(x, height + capH * 0.5f, z)));
+				}
+				else if (rCap < 0.38f)
+				{
+					// SETBACK — a smaller concentric hex stepped in (rides the prism MMI).
+					float frac = rng.RandfRange(0.5f, 0.74f);
+					float capH = Mathf.Clamp(height * rng.RandfRange(0.05f, 0.12f), 6.0f * scale, 90.0f * scale);
+					Basis cb = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx * frac, capH, fz * frac));
+					AddInstance(layout, (int)Silhouette.Prism, new Transform3D(cb, new Vector3(x, height + capH * 0.5f, z)), PenthouseProfile(rng));
+				}
+				else gotCap = false;
+				break;
+			case Silhouette.Taper:
+				if (rCap < 0.26f)
+				{
+					// SPIRE — continues the taper to a point. The taper narrows to ~0.56× its footprint at
+					// the top, so the cone starts from that smaller circle for a seamless continuation.
+					float spireH = Mathf.Clamp(height * rng.RandfRange(0.18f, 0.46f), 12.0f * scale, 300.0f * scale);
+					Basis sb = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx * 0.56f, spireH, fz * 0.56f));
+					layout.Spires.Add(new Transform3D(sb, new Vector3(x, height + spireH * 0.5f, z)));
+				}
+				else if (rCap < 0.40f)
+				{
+					// DOME — caps the taper's narrowed top.
+					float domeH = Mathf.Min(fx, fz) * 0.56f * rng.RandfRange(0.85f, 1.15f);
+					Basis db = new Basis(Vector3.Up, yaw).Scaled(new Vector3(fx * 0.56f, domeH, fz * 0.56f));
+					layout.Domes.Add(new Transform3D(db, new Vector3(x, height, z)));
+				}
+				else gotCap = false;
+				break;
+			default:
+				gotCap = false;   // Shard / Sphere — pointy or organic tops keep no cap
+				break;
 		}
-		else if (rCap < 0.33f)
-		{
-			// SPIRE / cone.
-			float spireH = Mathf.Clamp(height * rng.RandfRange(0.12f, 0.34f), 10.0f * scale, 260.0f * scale);
-			float baseDiam = Mathf.Min(fx, fz) * rng.RandfRange(0.30f, 0.60f);
-			Basis sb = Basis.Identity.Scaled(new Vector3(baseDiam, spireH, baseDiam));
-			layout.Spires.Add(new Transform3D(sb, new Vector3(x, height + spireH * 0.5f, z)));
-		}
-		else if (rCap < 0.42f)
-		{
-			// DOME — sphere centred at the roofline so only the top half shows.
-			float domeDiam = Mathf.Min(fx, fz) * rng.RandfRange(0.50f, 0.92f);
-			float domeH = domeDiam * rng.RandfRange(0.45f, 0.80f);
-			Basis db = Basis.Identity.Scaled(new Vector3(domeDiam, domeH, domeDiam));
-			layout.Domes.Add(new Transform3D(db, new Vector3(x, height, z)));
-		}
+
+		// A flat roof that grew no cap may instead get a landing pad (sometimes with a parked car).
+		if (!gotCap && flatTop && rng.Randf() < LandingPadChance)
+			AddLandingPad(rng, layout, x, z, height, fx, fz, yaw, scale);
 	}
 
-	// Appends an extra Box-silhouette instance (skybridge, rooftop penthouse) so it rides the building
-	// MultiMesh and is lit by the same window shader — no separate draw call or material.
-	private static void AddBoxInstance(BuildingLayout layout, Transform3D xform, WindowProfile wp)
+	// Appends an extra building-silhouette instance (skybridge, rooftop setback, ziggurat step, sphere,
+	// arch segment) so it rides the building MultiMesh and is lit by the same window shader — no separate
+	// draw call or material. `shape` lets a setback match its tower (box steps to box, hex prism to hex).
+	private static void AddInstance(BuildingLayout layout, int shape, Transform3D xform, WindowProfile wp)
 	{
 		layout.Transforms.Add(xform);
-		layout.Shapes.Add((int)Silhouette.Box);
+		layout.Shapes.Add(shape);
 		layout.Colors.Add(new Color(wp.Color.R, wp.Color.G, wp.Color.B, wp.LitFraction));
 		layout.Custom.Add(new Color(wp.Variation, wp.GridClass, wp.AccentHue, wp.AccentAmount));
+	}
+
+	// A stepped-pyramid ziggurat: several stacked boxes of shrinking footprint (each a building-MMI
+	// instance sharing the tower's window profile), with a slight per-step twist for a futuristic spiral.
+	// Outputs the top step's height + footprint so the roof dressing caps the apex.
+	private static void BuildZiggurat(RandomNumberGenerator rng, BuildingLayout layout, WindowProfile wp, float x, float z, float height, float fx, float fz, float yaw, out float topY, out float topFx, out float topFz)
+	{
+		int steps = rng.RandiRange(3, 6);
+		float twist = rng.RandfRange(-0.10f, 0.10f);     // radians added per step
+		float topScale = rng.RandfRange(0.28f, 0.45f);   // footprint fraction at the very top
+		float stepH = height / steps;
+		for (int i = 0; i < steps; i++)
+		{
+			float t = steps > 1 ? (float)i / (steps - 1) : 0.0f;
+			float f = Mathf.Lerp(1.0f, topScale, t);
+			float yc = (i + 0.5f) * stepH;
+			Basis b = new Basis(Vector3.Up, yaw + twist * i).Scaled(new Vector3(fx * f, stepH * 1.04f, fz * f));
+			AddInstance(layout, (int)Silhouette.Box, new Transform3D(b, new Vector3(x, yc, z)), wp);
+		}
+		topY = height;
+		topFx = fx * topScale;
+		topFz = fz * topScale;
+	}
+
+	// A multi-spherical tower: 2–4 stacked spheres of shrinking radius (each a building-MMI Sphere instance
+	// sharing the profile, lit by a window belt around its equator). Outputs the top sphere's crown height
+	// + footprint for the roof dressing.
+	private static void BuildSphereStack(RandomNumberGenerator rng, BuildingLayout layout, WindowProfile wp, float x, float z, float height, float fx, float fz, float yaw, out float topY, out float topFx, out float topFz)
+	{
+		int balls = rng.RandiRange(2, 4);
+		float r0 = 0.5f * Mathf.Min(fx, fz);
+		float topScale = rng.RandfRange(0.45f, 0.70f);
+		float y = 0.0f, prevR = 0.0f, ri = r0;
+		for (int i = 0; i < balls; i++)
+		{
+			float t = balls > 1 ? (float)i / (balls - 1) : 0.0f;
+			ri = r0 * Mathf.Lerp(1.0f, topScale, t);
+			float squash = rng.RandfRange(0.85f, 1.15f);
+			y = (i == 0) ? ri : y + (prevR + ri) * 0.72f;   // rest on the previous sphere with overlap
+			Basis b = new Basis(Vector3.Up, yaw).Scaled(new Vector3(2.0f * ri, 2.0f * ri * squash, 2.0f * ri));
+			AddInstance(layout, (int)Silhouette.Sphere, new Transform3D(b, new Vector3(x, y, z)), wp);
+			prevR = ri;
+		}
+		topY = y + ri;
+		topFx = 2.0f * ri;
+		topFz = 2.0f * ri;
+	}
+
+	// A rooftop landing pad — a low glowing disc set a little off-centre on a flat roof, sometimes with a
+	// parked magenta flying car. Pads ride one per-chunk MultiMesh, cars another. roofY is the flat top;
+	// fx/fz/yaw are the roof footprint so the pad (and offset) stay inside the parapet.
+	private void AddLandingPad(RandomNumberGenerator rng, BuildingLayout layout, float x, float z, float roofY, float fx, float fz, float yaw, float scale)
+	{
+		float padR = Mathf.Min(Mathf.Min(fx, fz) * rng.RandfRange(0.16f, 0.30f), 26.0f * scale);   // cap so huge roofs don't get blinding pads
+		if (padR < 4.0f * scale)
+			return;                       // roof too small for a believable pad
+		// Offset toward a roof quadrant in the tower's local frame, then rotate into world space.
+		float ox = fx * rng.RandfRange(-0.22f, 0.22f);
+		float oz = fz * rng.RandfRange(-0.22f, 0.22f);
+		float cs = Mathf.Cos(yaw), sn = Mathf.Sin(yaw);
+		float wx = x + ox * cs - oz * sn;
+		float wz = z + ox * sn + oz * cs;
+		float padThick = 1.2f * scale;
+		Basis pb = new Basis(Vector3.Up, yaw).Scaled(new Vector3(padR * 2.0f, padThick, padR * 2.0f));
+		layout.Pads.Add(new Transform3D(pb, new Vector3(wx, roofY + padThick * 0.5f, wz)));
+		if (rng.Randf() < ParkedCarChance)
+		{
+			float carLen = padR * rng.RandfRange(0.8f, 1.3f);
+			float carW = carLen * rng.RandfRange(0.40f, 0.55f);
+			float carH = carW * rng.RandfRange(0.40f, 0.60f);
+			float carYaw = yaw + rng.RandfRange(-3.14159f, 3.14159f);
+			Basis cb = new Basis(Vector3.Up, carYaw).Scaled(new Vector3(carW, carH, carLen));
+			layout.ParkedCars.Add(new Transform3D(cb, new Vector3(wx, roofY + padThick + carH * 0.5f, wz)));
+		}
 	}
 
 	// A dim, mostly-dark mechanical-penthouse window profile (few lit windows, almost no colour).
@@ -567,7 +765,73 @@ public partial class CityChunk : Node3D
 			float h = rng.RandfRange(5.0f, 10.0f) * scale;
 			float w = rng.RandfRange(8.0f, 16.0f) * scale;
 			Basis basis = Basis.Identity.Scaled(new Vector3(lenX, h, w));
-			AddBoxInstance(layout, new Transform3D(basis, new Vector3(centerX, by, midZ)), BridgeProfile(rng));
+			AddInstance(layout, (int)Silhouette.Box, new Transform3D(basis, new Vector3(centerX, by, midZ)), BridgeProfile(rng));
+		}
+	}
+
+	// Cross-corridor skybridge pass — occasionally span the flyable tube between a row's two INNERMOST
+	// towers (col 0 each side) with a high lit walkway. Rare (CrossSkybridgeChance) and at a per-bridge
+	// height, so the odd glowing deck crosses overhead instead of walling the corridor. Visual only (rides
+	// the building MMI, no collision — like every building), continuing the same deterministic stream.
+	private void BridgeAcrossCorridor(RandomNumberGenerator rng, BuildingLayout layout, Dictionary<(int, int, int), PlacedBuilding> lookup, List<PlacedBuilding> placed, float scale)
+	{
+		foreach (PlacedBuilding a in placed)
+		{
+			if (a.Side > 0.0f || a.Col != 0)
+				continue;                            // drive from the LEFT inner tower (one bridge per row)
+			if (!lookup.TryGetValue((SideIdx(1.0f), 0, a.Row), out PlacedBuilding b))
+				continue;                            // need the right inner tower in the same row
+			if (rng.Randf() > CrossSkybridgeChance)
+				continue;
+			float leftFace = a.X + a.HalfX;          // left tower's face toward the corridor (+X)
+			float rightFace = b.X - b.HalfX;         // right tower's face toward the corridor (-X)
+			float gap = rightFace - leftFace;
+			if (gap < 20.0f * scale)
+				continue;                            // sanity — should span the whole corridor
+			float embed = 6.0f * scale;              // sink the ends into both towers
+			float lenX = gap + 2.0f * embed;
+			float centerX = 0.5f * (leftFace + rightFace);
+			float minTop = Mathf.Min(a.Top, b.Top);
+			float by = rng.RandfRange(0.35f, 0.85f) * minTop;   // varied height per bridge
+			float midZ = 0.5f * (a.Z + b.Z);
+			float zSpan = Mathf.Abs(a.Z - b.Z);
+			float h = rng.RandfRange(7.0f, 12.0f) * scale;
+			float w = Mathf.Max(rng.RandfRange(12.0f, 20.0f) * scale, zSpan + 10.0f * scale);  // reach both ends in Z
+			Basis basis = Basis.Identity.Scaled(new Vector3(lenX, h, w));
+			AddInstance(layout, (int)Silhouette.Box, new Transform3D(basis, new Vector3(centerX, by, midZ)), BridgeProfile(rng));
+		}
+	}
+
+	// Arch pass — occasionally grow a monumental ARC-SHAPED gateway across the corridor: two legs just
+	// outside the flyable tube, joined by a faceted semicircular span overhead (the "horizontal part across
+	// the street"). The ship flies between the legs and under the arc. Visual only, rides the building MMI.
+	private void MaybeBuildArch(RandomNumberGenerator rng, BuildingLayout layout, float scale)
+	{
+		if (rng.Randf() > ArchChance)
+			return;
+		WindowProfile wp = BridgeProfile(rng);
+		float z = -rng.RandfRange(0.12f, 0.88f) * ChunkLength;       // somewhere along this chunk
+		float baseY = CorridorFloor;
+		float legHalf = rng.RandfRange(16.0f, 30.0f) * scale;       // leg X half-extent
+		float legD = rng.RandfRange(26.0f, 50.0f) * scale;         // leg + arch depth (Z)
+		float legTopY = rng.RandfRange(140.0f, 460.0f) * scale;    // where the legs hand off to the arc
+		float margin = EdgeMargin + rng.RandfRange(0.0f, 12.0f);
+		float r = CorridorHalfWidth + margin + legHalf;            // arc radius = leg-centre X
+		float legH = Mathf.Max(legTopY - baseY, 20.0f * scale);
+		Basis lb = Basis.Identity.Scaled(new Vector3(legHalf * 2.0f, legH, legD));
+		AddInstance(layout, (int)Silhouette.Box, new Transform3D(lb, new Vector3(-r, baseY + legH * 0.5f, z)), wp);
+		AddInstance(layout, (int)Silhouette.Box, new Transform3D(lb, new Vector3(r, baseY + legH * 0.5f, z)), wp);
+		// Faceted semicircular arc from the left leg top, over the corridor, to the right leg top.
+		int segs = 11;
+		float archThick = rng.RandfRange(16.0f, 28.0f) * scale;
+		float segLen = 2.0f * r * Mathf.Sin(Mathf.Pi / (2.0f * segs)) * 1.12f;   // chord + a little overlap
+		for (int i = 0; i < segs; i++)
+		{
+			float tm = Mathf.Pi * (i + 0.5f) / segs;               // 0..π sweep across the corridor
+			float px = r * Mathf.Cos(tm);
+			float py = legTopY + r * Mathf.Sin(tm);
+			Basis sb = new Basis(new Vector3(0.0f, 0.0f, 1.0f), tm + Mathf.Pi * 0.5f).Scaled(new Vector3(segLen, archThick, legD));
+			AddInstance(layout, (int)Silhouette.Box, new Transform3D(sb, new Vector3(px, py, z)), wp);
 		}
 	}
 
@@ -688,6 +952,32 @@ public partial class CityChunk : Node3D
 			_domeMmi = new MultiMeshInstance3D { Name = "Domes", Multimesh = _domeMm, MaterialOverride = GetStructureMat() };
 			AddChild(_domeMmi);
 		}
+		if (_pyramidMmi == null)
+		{
+			_pyramidMm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = GetPyramidMesh() };
+			_pyramidMmi = new MultiMeshInstance3D { Name = "Pyramids", Multimesh = _pyramidMm, MaterialOverride = GetStructureMat() };
+			AddChild(_pyramidMmi);
+		}
+		if (_hexCapMmi == null)
+		{
+			_hexCapMm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = GetHexCapMesh() };
+			_hexCapMmi = new MultiMeshInstance3D { Name = "HexCaps", Multimesh = _hexCapMm, MaterialOverride = GetStructureMat() };
+			AddChild(_hexCapMmi);
+		}
+		if (_padMmi == null)
+		{
+			_padMm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = GetPadMesh() };
+			_padMmi = new MultiMeshInstance3D { Name = "LandingPads", Multimesh = _padMm, MaterialOverride = GetPadMat() };
+			_padMmi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+			AddChild(_padMmi);
+		}
+		if (_carMmi == null)
+		{
+			_carMm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = GetCarMesh() };
+			_carMmi = new MultiMeshInstance3D { Name = "ParkedCars", Multimesh = _carMm, MaterialOverride = GetCarMat() };
+			_carMmi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+			AddChild(_carMmi);
+		}
 	}
 
 	private void EnsureObstacles()
@@ -760,7 +1050,7 @@ public partial class CityChunk : Node3D
 		_buildingMat.SetShaderParameter("window_scale", pWorldScale);   // per-building grid sizes are scaled by this
 		if (_buildingMeshes == null)
 		{
-			// Index order MUST match the Silhouette enum (Box, Round, Prism, Taper).
+			// Index order MUST match the Silhouette enum (Box, Round, Prism, Taper, Shard, Sphere).
 			var box = new BoxMesh();
 			box.Size = Vector3.One;
 			box.Material = _buildingMat;
@@ -786,7 +1076,23 @@ public partial class CityChunk : Node3D
 			taper.RadialSegments = 20;
 			taper.Material = _buildingMat;
 
-			_buildingMeshes = new Mesh[] { box, roundTower, prism, taper };
+			// SHARD — a steep 4-sided tapered spike (near-vertical glass faces, sharp top). Futuristic.
+			var shard = new CylinderMesh();
+			shard.Height = 1.0f;
+			shard.TopRadius = 0.05f;
+			shard.BottomRadius = 0.5f;
+			shard.RadialSegments = 4;
+			shard.Material = _buildingMat;
+
+			// SPHERE — for multi-spherical stacks; a window belt lands around its equator.
+			var sphere = new SphereMesh();
+			sphere.Radius = 0.5f;
+			sphere.Height = 1.0f;
+			sphere.RadialSegments = 18;
+			sphere.Rings = 9;
+			sphere.Material = _buildingMat;
+
+			_buildingMeshes = new Mesh[] { box, roundTower, prism, taper, shard, sphere };
 		}
 		return _buildingMeshes;
 	}
@@ -909,6 +1215,117 @@ public partial class CityChunk : Node3D
 		return _domeMesh;
 	}
 
+	// A square pyramid cap, built so its base is the UNIT box footprint (corners at ±0.5) and its apex is
+	// at y = 1 — scaling by (fx, capH, fz) and sharing the tower's yaw makes it sit flush on a Box roof.
+	// Four flat-shaded side faces (the base is hidden inside the tower).
+	private static Mesh GetPyramidMesh()
+	{
+		if (_pyramidMesh == null)
+		{
+			var st = new SurfaceTool();
+			st.Begin(Mesh.PrimitiveType.Triangles);
+			Vector3 a = new(-0.5f, 0.0f, -0.5f);
+			Vector3 b = new(0.5f, 0.0f, -0.5f);
+			Vector3 c = new(0.5f, 0.0f, 0.5f);
+			Vector3 d = new(-0.5f, 0.0f, 0.5f);
+			Vector3 apex = new(0.0f, 1.0f, 0.0f);
+			AddTri(st, apex, b, a);
+			AddTri(st, apex, c, b);
+			AddTri(st, apex, d, c);
+			AddTri(st, apex, a, d);
+			st.GenerateNormals();
+			_pyramidMesh = st.Commit();
+		}
+		return _pyramidMesh;
+	}
+
+	private static void AddTri(SurfaceTool st, Vector3 v0, Vector3 v1, Vector3 v2)
+	{
+		st.AddVertex(v0);
+		st.AddVertex(v1);
+		st.AddVertex(v2);
+	}
+
+	// A hexagonal pyramid cap (6-sided cone) — aligns with a Prism tower's hexagon (same radius + yaw).
+	private static Mesh GetHexCapMesh()
+	{
+		if (_hexCapMesh == null)
+		{
+			_hexCapMesh = new CylinderMesh
+			{
+				Height = 1.0f,
+				TopRadius = 0.0f,
+				BottomRadius = 0.5f,
+				RadialSegments = 6,
+				Rings = 0,
+			};
+		}
+		return _hexCapMesh;
+	}
+
+	// A flat landing-pad disc (unit cylinder, scaled thin), drawn by the glowing helipad material.
+	private static Mesh GetPadMesh()
+	{
+		if (_padMesh == null)
+		{
+			_padMesh = new CylinderMesh
+			{
+				Height = 1.0f,
+				TopRadius = 0.5f,
+				BottomRadius = 0.5f,
+				RadialSegments = 20,
+				Rings = 0,
+			};
+		}
+		return _padMesh;
+	}
+
+	// A glowing teal helipad — emissive enough to read as a lit platform on a dark roof.
+	private static StandardMaterial3D GetPadMat()
+	{
+		if (_padMat == null)
+		{
+			_padMat = new StandardMaterial3D
+			{
+				AlbedoColor = new Color(0.02f, 0.04f, 0.05f),
+				Metallic = 0.3f,
+				Roughness = 0.5f,
+				EmissionEnabled = true,
+				Emission = new Color(0.10f, 0.80f, 0.90f),
+				EmissionEnergyMultiplier = 0.85f,
+			};
+		}
+		return _padMat;
+	}
+
+	// A small parked flying car — a unit box, scaled per car, drawn by the magenta emissive material.
+	private static Mesh GetCarMesh()
+	{
+		if (_carMesh == null)
+		{
+			_carMesh = new BoxMesh { Size = Vector3.One };
+		}
+		return _carMesh;
+	}
+
+	// Magenta emissive — matches the live traffic ships so parked cars read as the same fleet, at rest.
+	private static StandardMaterial3D GetCarMat()
+	{
+		if (_carMat == null)
+		{
+			_carMat = new StandardMaterial3D
+			{
+				AlbedoColor = new Color(0.15f, 0.02f, 0.10f),
+				Metallic = 0.6f,
+				Roughness = 0.35f,
+				EmissionEnabled = true,
+				Emission = new Color(1.00f, 0.10f, 0.70f),
+				EmissionEnergyMultiplier = 1.4f,
+			};
+		}
+		return _carMat;
+	}
+
 	// Dark structural concrete/metal for rooftop caps — catches a faint sky reflection so domes/spires
 	// read as silhouettes against the neon haze. Shared across the whole game.
 	private static StandardMaterial3D GetStructureMat()
@@ -925,6 +1342,7 @@ public partial class CityChunk : Node3D
 				EmissionEnabled = true,
 				Emission = new Color(0.10f, 0.13f, 0.22f),
 				EmissionEnergyMultiplier = 0.5f,
+				CullMode = BaseMaterial3D.CullModeEnum.Disabled,   // pyramids/caps show regardless of face winding
 			};
 		}
 		return _structureMat;
