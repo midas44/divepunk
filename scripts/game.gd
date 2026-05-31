@@ -321,7 +321,20 @@ func _apply_camera_config(rig: Node3D) -> void:
 	rig.base_fov = float(_cfg_value("camera", "base_fov", rig.base_fov))
 	rig.max_fov = float(_cfg_value("camera", "max_fov", rig.max_fov))
 	rig.near_distance = float(_cfg_value("camera", "near", rig.near_distance))
-	rig.far_distance = float(_cfg_value("camera", "far", rig.far_distance))
+	# The far clip must cover the streamed city, or this plane (not the fog) chops the far edge.
+	# Auto-size it from the [streaming] knobs so raising chunks_ahead/behind "just works" with no
+	# second edit; a manually-set [camera] far that's LARGER still wins (e.g. to see past the fog).
+	var manual_far := float(_cfg_value("camera", "far", rig.far_distance))
+	rig.far_distance = maxf(manual_far, _city_draw_distance() * 1.15 + 1000.0)
+
+
+## Farthest extent of the streamed city ahead/behind the ship (m) = the longer run × chunk length.
+## Drives the auto-sized camera far clip above so the clip plane never cuts the city before the fog.
+func _city_draw_distance() -> float:
+	var clen := float(_cfg_value("streaming", "chunk_length", 200.0))
+	var ahead := int(_cfg_value("streaming", "chunks_ahead", 72))
+	var behind := int(_cfg_value("streaming", "chunks_behind", 72))
+	return float(maxi(ahead, behind) + 1) * clen
 
 
 func _ensure_environment() -> void:
@@ -416,6 +429,11 @@ func _build_environment() -> Environment:
 	env.volumetric_fog_emission_energy = 0.4
 	env.volumetric_fog_length = float(_cfg_value("fx", "volumetric_fog_length", 6000.0))
 	env.volumetric_fog_gi_inject = 0.2
+	# CRITICAL for a visible sky: this defaults to 1.0, which paints the (dark) volumetric haze over
+	# the WHOLE sky dome at full strength — the sky sits behind the entire fog column, so it rendered
+	# as "just blackness" no matter how bright the sky shader was. Keep it near 0 so the haze affects
+	# the scene depth but not the sky itself.
+	env.volumetric_fog_sky_affect = float(_cfg_value("fx", "volumetric_fog_sky_affect", 0.0))
 
 	# Screen-space reflections — wet-street neon (Forward+ desktop); reflects in the RefGround.
 	env.ssr_enabled = bool(_cfg_value("fx", "ssr", true))
