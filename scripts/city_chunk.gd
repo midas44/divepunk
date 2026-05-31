@@ -37,9 +37,10 @@ enum {SHP_BOX, SHP_ROUND, SHP_PRISM, SHP_TAPER}   ## index order MUST match _get
 @export var corridor_ceiling: float = 1700.0     ## corridor ceiling in metres (set by ChunkManager from [corridor] ceiling)
 
 @export_group("Buildings")
-@export var columns_per_side: int = 3            ## building rows stacked outward from the corridor
-@export var rows_per_chunk: int = 12             ## building slots along the chunk's length, per column
-@export var column_spacing: float = 42.0         ## X gap between building columns (×world_scale); widened for the bigger footprints
+@export var columns_per_side: int = 3            ## building columns stacked outward from the corridor
+@export var rows_per_chunk: int = 8              ## building slots along the chunk's length, per column (÷world_scale)
+@export var column_spacing: float = 60.0         ## X step between columns (×world_scale); columns are anchored by their inner face and step outward
+@export var edge_margin: float = 12.0            ## clear gap (m) kept between the corridor wall and the nearest building face
 @export_range(0.0, 1.0) var fill_chance: float = 0.86   ## per-slot chance of a building (gaps add variety)
 @export_range(0.0, 1.0) var cell_depth_jitter: float = 0.35
 @export var world_scale: float = 1.0   ## set by ChunkManager; >1 enlarges buildings + spacing around the constant-size car (1.0 = original)
@@ -58,10 +59,12 @@ enum {SHP_BOX, SHP_ROUND, SHP_PRISM, SHP_TAPER}   ## index order MUST match _get
 @export var mid_height: Vector2 = Vector2(80.0, 200.0)
 @export var high_height: Vector2 = Vector2(200.0, 420.0)
 @export var mega_height: Vector2 = Vector2(420.0, 880.0)
-@export var low_footprint: Vector2 = Vector2(14.0, 34.0)
-@export var mid_footprint: Vector2 = Vector2(12.0, 24.0)
-@export var high_footprint: Vector2 = Vector2(13.0, 26.0)
-@export var mega_footprint: Vector2 = Vector2(26.0, 52.0)
+@export var low_footprint: Vector2 = Vector2(22.0, 60.0)
+@export var mid_footprint: Vector2 = Vector2(26.0, 75.0)
+@export var high_footprint: Vector2 = Vector2(32.0, 95.0)
+@export var mega_footprint: Vector2 = Vector2(50.0, 140.0)
+@export var footprint_aspect_min: float = 0.72   ## per-axis spread on the footprint, so towers vary in proportion (square / oblong / slab), not just size
+@export var footprint_aspect_max: float = 1.35
 
 @export_group("Building shapes")
 ## Silhouette mix. Each non-empty shape is one extra MultiMesh per chunk (one draw call), so a 0 weight
@@ -165,23 +168,31 @@ func compute_building_layout(base_seed: int, p_index: int, diff: float) -> Dicti
 
 	for side: float in [-1.0, 1.0]:
 		for col: int in columns_per_side:
-			var col_x: float = side * (corridor_half_width + column_spacing * scale * (float(col) + 0.5))
 			for row: int in eff_rows:
 				if rng.randf() > fill_chance:
 					continue   # leave a gap
 				var cls: int = _pick_class(rng, class_total, col)
 				var h_range: Vector2 = _class_height(cls)
 				var f_range: Vector2 = _class_footprint(cls)
-				var fx: float = rng.randf_range(f_range.x, f_range.y) * scale
-				var fz: float = rng.randf_range(f_range.x, f_range.y) * scale
+				# Footprint: a per-building base size from the class range, then an INDEPENDENT aspect roll
+				# on each axis, so towers vary widely in both size and proportion (square / oblong / slab).
+				var fp: float = rng.randf_range(f_range.x, f_range.y)
+				var fx: float = fp * rng.randf_range(footprint_aspect_min, footprint_aspect_max) * scale
+				var fz: float = fp * rng.randf_range(footprint_aspect_min, footprint_aspect_max) * scale
 				var height: float = rng.randf_range(h_range.x, h_range.y)
 				height *= 0.65 + 0.35 * diff        # taller as difficulty ramps
 				height *= 1.0 + 0.12 * float(col)    # outer columns a touch taller
 				height *= scale                      # ...and overall bigger with world_scale
-				var x: float = col_x + rng.randf_range(-3.0, 3.0) * scale
+				var yaw: float = rng.randf_range(-0.12, 0.12)
+				# Anchor each building by its INNER face so it grows OUTWARD from the corridor as it gets
+				# wider — the flyable tube stays clear at ANY footprint. half_x is the rotated footprint's
+				# X half-extent, so the yaw never lets a corner creep inward. Columns step outward by `step`.
+				var step: float = column_spacing * scale
+				var col_inner: float = corridor_half_width + edge_margin + step * float(col)
+				var half_x: float = 0.5 * (absf(fx * cos(yaw)) + absf(fz * sin(yaw)))
+				var x: float = side * (col_inner + half_x + rng.randf_range(0.0, 0.25) * step)
 				var z: float = -(float(row) + 0.5) * row_spacing \
 					+ rng.randf_range(-row_spacing, row_spacing) * cell_depth_jitter
-				var yaw: float = rng.randf_range(-0.12, 0.12)
 				var shape: int = _pick_shape(rng, shape_total)
 				var basis := Basis(Vector3.UP, yaw).scaled(Vector3(fx, height, fz))
 				transforms.append(Transform3D(basis, Vector3(x, height * 0.5, z)))
