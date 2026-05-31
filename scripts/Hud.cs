@@ -31,6 +31,21 @@ public partial class Hud : CanvasLayer
 		OnHighScoreChanged(sm.HighScore);
 	}
 
+	public override void _ExitTree()
+	{
+		// ScoreManager is a persistent autoload, so a scene reload (restart) would otherwise leave
+		// this freed HUD's handlers connected to it — and ScoreManager.Tick() emits ScoreChanged every
+		// frame, calling into our disposed labels (ObjectDisposedException). GDScript auto-disconnects
+		// a signal when its receiver node is freed; C# does not, so do it explicitly here.
+		ScoreManager sm = ScoreManager.Instance;
+		if (sm != null)
+		{
+			sm.ScoreChanged -= OnScoreChanged;
+			sm.HighScoreChanged -= OnHighScoreChanged;
+			sm.NearMissRegistered -= OnNearMiss;
+		}
+	}
+
 	public void SetShip(Ship s)
 	{
 		_ship = s;
