@@ -1,115 +1,128 @@
 using Godot;
 
-// Arcade flight controller — DIVEPUNK.
+// Assisted-arcade 6-DOF flying car — DIVEPUNK (spec §7.4). A RigidBody3D simulated by Jolt: thrust along
+// the nose, pitch/yaw/roll torques, PD auto-leveling (self-rights on release), coordinated banked turns,
+// and a speed clamp. Collisions are resolved by Jolt as a bounce; contact impulse becomes damage via the
+// child DamageComponent in _IntegrateForces. Health at zero does NOTHING — there is no game-over.
 //
-// Attach to a CharacterBody3D (Game.cs will create one automatically if you just
-// press Play). Throttle-driven forward motion with inertia: the player throttles up/down
-// and steers laterally and vertically. Every number is exported so you can dial in the
-// "feel" live in the Inspector.
-//
-// NOTE: this is the interim CharacterBody3D flyer. Task 2 rewrites it as an assisted-arcade
-// RigidBody3D 6-DOF controller with collision bounce + impulse damage (spec §7.4).
-public partial class Ship : CharacterBody3D
+// Attach to a RigidBody3D (Game.cs creates one automatically on Play). Every number is exported so you
+// can dial in the "feel" live in the Inspector / settings.cfg [flight].
+public partial class Ship : RigidBody3D
 {
-	[ExportGroup("Speed (throttle + inertia)")]
-	[Export] public float BaseSpeed = 300.0f;       // forward speed a run STARTS at (m/s)
-	[Export] public float MinSpeed = 0.0f;          // slowest the throttle reaches (m/s); raise above 0 so the ship never fully stops
-	[Export] public float MaxSpeed = 2000.0f;       // fastest the throttle reaches (m/s)
-	[Export] public float AccelerateRate = 240.0f;  // throttle-up: how fast `accelerate` adds speed (m/s²)
-	[Export] public float DecelerateRate = 320.0f;  // throttle-down: how fast `decelerate` bleeds speed (m/s²)
-	// INERTIA: with neither throttle key held, speed is HELD constant (no auto-ramp, no drag) — the
-	// engine maintains whatever speed you last throttled to. Speed is clamped to [MinSpeed, MaxSpeed].
+	[ExportGroup("Thrust")]
+	[Export] public float MaxSpeed = 1000.0f;     // LinearVelocity clamp (m/s) — carried from old [ship] max_speed
+	[Export] public float ThrustForce = 4000.0f;  // forward push (N) along -Basis.Z when accelerating
+	[Export] public float BrakeForce = 6000.0f;   // reverse/brake push (N) when decelerating
+	[Export] public float BodyMass = 4.0f;        // sets RigidBody3D.Mass in _Ready (force feel scales with it)
 
-	[ExportGroup("Steering")]
-	[Export] public float LateralSpeed = 45.0f;     // max sideways speed (m/s)
-	[Export] public float ClimbAngleDeg = 45.0f;    // climb/dive steepness: vertical speed = forward_speed × tan(this). 45° climbs as fast as you fly; 0° = no vertical; clamped under 90°
-	[Export] public float SteerSharpness = 8.0f;    // higher = snappier, lower = floatier
-	[Export] public float BankAngleDeg = 23.0f;     // visual roll into turns (pure juice)
-	[Export] public float PitchAngleDeg = 10.0f;    // visual pitch on climb / dive (pure juice)
-	[Export] public bool InvertPitch = true;        // true = nose pitches UP as you climb (natural arcade feel)
-	[Export] public bool InvertBank = true;         // true = banks INTO strafes the natural way
-	[Export] public float VisualLerp = 10.0f;       // how fast the model banks / pitches
+	[ExportGroup("Rotation (torque)")]
+	[Export] public float PitchTorque = 1400.0f;
+	[Export] public float YawTorque = 900.0f;
+	[Export] public float RollTorque = 1600.0f;
+	[Export] public bool InvertPitch = true;      // carried from old [ship] invert_pitch — flips pitch sign to taste
+	[Export] public bool InvertRoll = true;       // carried from old [ship] invert_bank
 
-	// Emitted every physics frame. ratio is 0 at MinSpeed, 1 at MaxSpeed; `accelerating` = throttling up.
+	[ExportGroup("Assist (auto-level + coordination)")]
+	[Export] public float LevelStrength = 9.0f;   // PD kP — self-rights pitch+roll toward the horizon (yaw left free)
+	[Export] public float LevelDamping = 4.5f;    // PD kD — kills the wobble so leveling settles crisply
+	[Export] public float BankCoordination = 0.7f;// yaw input adds proportional roll → turns feel like flying
+	[Export] public float LinearDampValue = 0.6f; // glide/coast (set onto RigidBody3D.LinearDamp)
+	[Export] public float AngularDampValue = 3.0f;// rotations settle when you let go (set onto AngularDamp)
+
+	[ExportGroup("Collision")]
+	[Export] public float Bounce = 0.3f;          // PhysicsMaterial bounce on impact (0 = dead, 1 = super-ball)
+	[Export] public float Friction = 0.4f;
+
+	// Preserved: drives camera FOV, speed-line FX, audio. Emitted every physics frame. ratio is 0..1 of
+	// MaxSpeed; `accelerating` = throttling up (drives the speed-up juice / shake / whoosh).
 	[Signal] public delegate void SpeedChangedEventHandler(float speed, float ratio, bool accelerating);
 
-	private float _forwardSpeed = 0.0f;
-	private Vector2 _steer = Vector2.Zero;
 	private Node3D _model;
+	private DamageComponent _damage;
 
 	public override void _Ready()
 	{
-		_forwardSpeed = Mathf.Clamp(BaseSpeed, MinSpeed, MaxSpeed);
-		EnsureVisualAndCollision();
+		// RigidBody setup for a hovering 6-DOF flyer.
+		GravityScale = 0.0f;                 // zero-G: it hovers; no constant fight to stay up (spec §7.4)
+		Mass = BodyMass;
+		LinearDamp = LinearDampValue;
+		AngularDamp = AngularDampValue;
+		CanSleep = false;                    // always simulating, so input is always responsive
+		ContactMonitor = true;               // required to read contacts in _IntegrateForces
+		MaxContactsReported = 8;             // spec §7.4
+		PhysicsMaterialOverride = new PhysicsMaterial { Bounce = Bounce, Friction = Friction };
+
+		EnsureVisualAndCollision();          // neon-box Model + box CollisionShape3D (rotate WITH the body now)
+		_damage = GetNodeOrNull<DamageComponent>("Damage");
+		if (_damage == null)
+		{
+			_damage = new DamageComponent { Name = "Damage" };
+			AddChild(_damage);               // it self-reads [damage] from Config in its own _Ready
+		}
 	}
 
+	// CONTROL — forces/torques applied each physics tick (standard RigidBody pattern). All inputs via
+	// InputMap actions. Auto-level runs only when you're NOT actively pitching/rolling (assisted feel).
 	public override void _PhysicsProcess(double delta)
 	{
-		float d = (float)delta;
+		Basis b = GlobalTransform.Basis;
 
-		// THROTTLE + INERTIA. Speed is a held state: `accelerate` adds, `decelerate` bleeds, and with
-		// neither held the engine simply MAINTAINS the current speed (no auto-ramp, no drag). Holding
-		// both nets the difference. Clamped to [MinSpeed, MaxSpeed].
-		float accelIn = Input.GetActionStrength("accelerate");
-		float decelIn = Input.GetActionStrength("decelerate");
-		_forwardSpeed += (accelIn * AccelerateRate - decelIn * DecelerateRate) * d;
-		_forwardSpeed = Mathf.Clamp(_forwardSpeed, MinSpeed, MaxSpeed);
-		// 3rd signal arg = "actively throttling up" — drives the speed-up juice (FX / shake / whoosh).
-		bool accelerating = accelIn > decelIn;
+		// Thrust along the nose (-Z). accelerate pushes forward, decelerate brakes/reverses.
+		float thrustIn = Input.GetActionStrength("accelerate") - Input.GetActionStrength("decelerate");
+		float force = thrustIn >= 0.0f ? ThrustForce : BrakeForce;
+		ApplyCentralForce(-b.Z * thrustIn * force);
 
-		// Smooth raw input toward target for a weighty-but-responsive feel (framerate independent).
-		Vector2 target = new Vector2(
-			Input.GetAxis("steer_left", "steer_right"),
-			Input.GetAxis("steer_down", "steer_up")
-		);
-		_steer = _steer.Lerp(target, 1.0f - Mathf.Exp(-SteerSharpness * d));
+		// Rotation input → torque about the body's local axes. Sign flips via the invert toggles + the
+		// GetAxis arg order; confirm the directions feel right in the playtest (that's what they're for).
+		float pitchIn = Input.GetAxis("steer_down", "steer_up") * (InvertPitch ? 1.0f : -1.0f);
+		float yawIn   = Input.GetAxis("steer_right", "steer_left");
+		float rollIn  = Input.GetAxis("roll_right", "roll_left") * (InvertRoll ? 1.0f : -1.0f);
+		ApplyTorque(b.X * pitchIn * PitchTorque);
+		ApplyTorque(b.Y * yawIn   * YawTorque);
+		ApplyTorque(b.Z * rollIn  * RollTorque);
 
-		// Compose velocity: held forward (−Z) + steering on X / Y. Climb/dive speed is the forward speed
-		// projected at ClimbAngleDeg (vertical = forward × tan θ), so 45° climbs as fast as you fly.
-		// The angle is clamped just under 90° to keep tan finite.
-		float vert = _forwardSpeed * Mathf.Tan(Mathf.DegToRad(Mathf.Clamp(ClimbAngleDeg, 0.0f, 89.0f)));
-		Velocity = new Vector3(_steer.X * LateralSpeed, _steer.Y * vert, -_forwardSpeed);
-		MoveAndSlide();
+		// Coordinated turn: yaw adds proportional roll so the car banks INTO the turn.
+		ApplyTorque(b.Z * (-yawIn) * BankCoordination * RollTorque);
 
-		BankModel(d);
-		EmitSignal(SignalName.SpeedChanged, _forwardSpeed, GetSpeedRatio(), accelerating);
+		// PD auto-level: when not manually pitching/rolling, restore local-up toward world-up. (b.Y × Up)
+		// is a horizontal axis → it levels pitch+roll but does NOT yaw, so your heading is preserved.
+		if (Mathf.Abs(pitchIn) < 0.01f && Mathf.Abs(rollIn) < 0.01f)
+		{
+			Vector3 levelAxis = b.Y.Cross(Vector3.Up);
+			ApplyTorque(levelAxis * LevelStrength - AngularVelocity * LevelDamping);
+		}
+
+		float spd = LinearVelocity.Length();
+		EmitSignal(SignalName.SpeedChanged, spd, GetSpeedRatio(), thrustIn > 0.01f);
 	}
 
-	public float GetSpeed() => _forwardSpeed;
-
-	// Current vertical speed (m/s): + climbing, − diving. Drives the HUD V-SPD indicator.
-	public float GetVerticalSpeed() => Velocity.Y;
-
-	// Absolute top forward speed (m/s) reachable. HUD horizontal-bar scale.
-	public float GetTopSpeed() => MaxSpeed;
-
-	// Top vertical speed (m/s) reachable at full forward speed. HUD V-SPD bar scale.
-	public float GetMaxVerticalSpeed() => MaxSpeed * Mathf.Tan(Mathf.DegToRad(Mathf.Clamp(ClimbAngleDeg, 0.0f, 89.0f)));
-
-	// 0..1 throttle position (current speed across the min→max range). Drives the HUD throttle bar.
-	public float GetBoostMeter() => Mathf.Clamp((_forwardSpeed - MinSpeed) / Mathf.Max(MaxSpeed - MinSpeed, 0.001f), 0.0f, 1.0f);
-
-	// 0 at MinSpeed, 1 at MaxSpeed. Drives camera FOV, speed lines, audio pitch, etc.
-	public float GetSpeedRatio() => Mathf.Clamp((_forwardSpeed - MinSpeed) / Mathf.Max(MaxSpeed - MinSpeed, 0.001f), 0.0f, 1.0f);
-
-	private void BankModel(float d)
+	// DAMAGE + speed clamp — runs in the physics solver callback, where contact impulses are valid.
+	public override void _IntegrateForces(PhysicsDirectBodyState3D state)
 	{
-		if (_model == null)
-			return;
-		// Roll into lateral turns, pitch into vertical movement. The sign flips are exposed
-		// (InvertPitch / InvertBank) so the nose pitches UP on a climb and strafes bank the way
-		// that feels right — both directions corrected. Tune in settings.cfg [ship].
-		float pitchSign = InvertPitch ? 1.0f : -1.0f;
-		float bankSign = InvertBank ? -1.0f : 1.0f;
-		Vector3 targetRot = new Vector3(
-			Mathf.DegToRad(pitchSign * _steer.Y * PitchAngleDeg),
-			0.0f,
-			Mathf.DegToRad(bankSign * _steer.X * BankAngleDeg)
-		);
-		_model.Rotation = _model.Rotation.Lerp(targetRot, 1.0f - Mathf.Exp(-VisualLerp * d));
+		int contacts = state.GetContactCount();
+		float impulse = 0.0f;
+		for (int i = 0; i < contacts; i++)
+			impulse += state.GetContactImpulse(i).Length();   // GetContactImpulse returns a Vector3 in Godot 4.6
+		if (impulse > 0.0f)
+			_damage?.ApplyImpact(impulse);
+
+		Vector3 v = state.LinearVelocity;
+		if (v.Length() > MaxSpeed)
+			state.LinearVelocity = v.Normalized() * MaxSpeed;
 	}
 
-	// Builds a placeholder neon box + collision so you can press Play with zero art.
+	// ---- preserved HUD/camera/FX API (keep the names + signatures) ----
+	public float GetSpeed() => LinearVelocity.Length();
+	public float GetVerticalSpeed() => LinearVelocity.Y;
+	public float GetTopSpeed() => MaxSpeed;
+	public float GetMaxVerticalSpeed() => MaxSpeed;          // V-SPD bar scale; vertical can reach top speed in 6-DOF
+	public float GetBoostMeter() => GetSpeedRatio();         // THROTTLE bar = current speed fraction
+	public float GetSpeedRatio() => Mathf.Clamp(GetSpeed() / Mathf.Max(MaxSpeed, 0.001f), 0.0f, 1.0f);
+	public float GetConditionRatio() => _damage?.GetHealthRatio() ?? 1.0f;   // NEW — HUD condition bar
+	public DamageComponent Damage => _damage;               // NEW — Game subscribes to its Damaged signal
+
+	// Builds a placeholder neon box + collision so you can press Play with zero art. The body itself
+	// pitches/rolls now, so the Model child sits at identity and rotates with its parent (no BankModel).
 	// Replace the "Model" child with a real ship mesh later — the controller doesn't care.
 	private void EnsureVisualAndCollision()
 	{

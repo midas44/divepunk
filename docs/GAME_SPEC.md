@@ -262,16 +262,16 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - **Goal:** the north-star docs describe the new game; the project still builds.
 
 ### Task 1 — Scaffolding & removals
-- [ ] Delete `autoload/ScoreManager.cs` (+ its `project.godot` autoload line), `scripts/GameOver.cs`, `scripts/ChunkManager.cs`, and the two dead `.tscn`s.
-- [ ] Scrub score / near-miss / combo / crash→game-over / corridor-clamp / streaming from `Game.cs`, `Hud.cs`, `Ship.cs`.
-- [ ] Trim `settings/settings.cfg`: drop the obsolete `[corridor]`/`[streaming]` sections; keep the rest intact. *(The new `[flight]`/`[damage]`/`[world]` sections land with their code in Tasks 2–3.)* Re-read it immediately before editing, preserve tuned values, stage it explicitly (`settings/settings.cfg` only, never `git add -A`).
-- [ ] `Game.cs` spawns car + camera + environment + a flat ground void (the car stays `CharacterBody3D` **for this task only**).
+- [x] Delete `autoload/ScoreManager.cs` (+ its `project.godot` autoload line), `scripts/GameOver.cs`, `scripts/ChunkManager.cs`, and the two dead `.tscn`s.
+- [x] Scrub score / near-miss / combo / crash→game-over / corridor-clamp / streaming from `Game.cs`, `Hud.cs`, `Ship.cs`.
+- [x] Trim `settings/settings.cfg`: drop the obsolete `[corridor]`/`[streaming]` sections; keep the rest intact. *(The new `[flight]`/`[damage]`/`[world]` sections land with their code in Tasks 2–3.)* Re-read it immediately before editing, preserve tuned values, stage it explicitly (`settings/settings.cfg` only, never `git add -A`).
+- [x] `Game.cs` spawns car + camera + environment + a flat ground void (the car stays `CharacterBody3D` **for this task only**).
 - **Goal:** boots clean, fly the void with a speed HUD, **no game-over possible**.
 
 ### Task 2 — Flight: `RigidBody3D` 6-DOF + damage *(the make-or-break feel gate)*
-- [ ] Rewrite `Ship.cs` to the assisted-arcade `RigidBody3D` 6-DOF controller.
-- [ ] Add `scripts/DamageComponent.cs`; wire `_IntegrateForces` → contact impulse → damage.
-- [ ] HUD condition bar; add roll/yaw input actions; drop test boxes to hit.
+- [x] Rewrite `Ship.cs` to the assisted-arcade `RigidBody3D` 6-DOF controller.
+- [x] Add `scripts/DamageComponent.cs`; wire `_IntegrateForces` → contact impulse → damage.
+- [x] HUD condition bar; add roll/yaw input actions; drop test boxes to hit.
 - **Goal:** 6-DOF self-stabilizing flight feels **great**; ramming a box bounces realistically + drops condition + **never ends the game**; releasing the stick re-levels. *Do not proceed until this feels right (the M1 gate).*
 
 ### Task 3 — World data + bake pipeline *(riskiest; pure data, no rendering)*
@@ -321,7 +321,7 @@ the player car) → interiors → audio design → Android. Prioritize against [
 
 ## 11. Open Decisions
 
-- [ ] **Flight control mapping** — which axes map to WASD vs. roll/yaw, and how "assisted" vs. "free" (settle by playtest in Task 2).
+- [x] **Flight control mapping** — *settled (Task 2 playtest):* WASD rotates the car (W/S pitch, A/D yaw + coordinated bank), Q/E roll, Tab cycles camera, mouse free-look; assisted auto-level on release. (A WASD-translate / mouse-aim scheme stays a possible future alternative.)
 - [ ] **Object density gradient** — uniform city, or dense core fading to sparse outskirts?
 - [ ] **Water as gameplay** — visual-only now; later add soft drag/damage in the bay, or keep it scenery?
 - [ ] **Damage consequences** — what (if anything) happens as condition drops (handling loss, forced landing, repair stations)?

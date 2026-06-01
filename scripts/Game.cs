@@ -15,6 +15,10 @@ public partial class Game : Node3D
 
 	[ExportGroup("Juice")]
 	[Export] public float ShakeOnBoost = 0.35f;            // camera punch the moment a boost kicks in
+	[Export] public float ShakeOnImpact = 0.9f;            // camera punch master-scale on a collision (× dent severity)
+
+	[ExportGroup("Test")]
+	[Export] public bool SpawnTestObstacles = true;        // void test field (boxes + floor) to ram; remove when the real world lands (Task 4)
 
 	private Ship _ship;
 	private CameraRig _rig;
@@ -31,6 +35,7 @@ public partial class Game : Node3D
 		CaptureMouse();
 		EnsureEnvironment();
 		SpawnShipAndCamera();
+		SpawnTestField();
 		SpawnUi();
 		SpawnScreenFx();
 		AudioManager.Instance?.StartMusic();
@@ -71,7 +76,7 @@ public partial class Game : Node3D
 		if (_ship == null)
 		{
 			_ship = new Ship { Name = "Ship" };
-			ApplyShipConfig(_ship);      // apply config exports BEFORE AddChild so _Ready() initialises with them
+			ApplyFlightConfig(_ship);    // apply config exports BEFORE AddChild so _Ready() initialises with them
 			AddChild(_ship);
 			_ship.GlobalPosition = new Vector3(0.0f, 30.0f, 0.0f);
 		}
@@ -86,6 +91,80 @@ public partial class Game : Node3D
 
 		_rig.SetTarget(_ship);
 		_ship.SpeedChanged += OnShipSpeedChanged;
+		// Impact juice: the DamageComponent exists once the ship's _Ready has run (i.e. after AddChild).
+		if (_ship.Damage != null)
+			_ship.Damage.Damaged += OnShipDamaged;
+	}
+
+	// A handful of obstacles + a ground collider in the empty void so bounce + damage are testable before
+	// the real world lands (Task 4). Gated by SpawnTestObstacles so it's trivially removable. Deterministic
+	// placement (no RNG) so the field is identical every launch.
+	private void SpawnTestField()
+	{
+		if (!SpawnTestObstacles || GetNodeOrNull("TestField") != null)
+			return;
+
+		var field = new Node3D { Name = "TestField" };
+		AddChild(field);
+
+		var bounceMat = new PhysicsMaterial { Bounce = 0.3f, Friction = 0.5f };
+
+		// Collision floor: a large finite slab with its top face at Y=0, so you can bounce off the ground.
+		// NOTE: WorldBoundaryShape3D is FINITE under Jolt (a ~1000 m slab centred at origin), so the car
+		// would fly off its edge — a big box won't. The visual RefGround (Game._ground) still follows you.
+		var floor = new StaticBody3D { Name = "Floor" };
+		floor.PhysicsMaterialOverride = bounceMat;
+		var floorCol = new CollisionShape3D { Name = "Col" };
+		floorCol.Shape = new BoxShape3D { Size = new Vector3(40000.0f, 10.0f, 40000.0f) };
+		floor.AddChild(floorCol);
+		floor.Position = new Vector3(0.0f, -5.0f, 0.0f);   // top face at Y=0
+		field.AddChild(floor);
+
+		// Emissive boxes scattered ahead (-Z) and around the spawn at varied heights, so you can fly out
+		// and ram them. Bright neon so they read against the dark void.
+		Vector3[] pos =
+		{
+			new Vector3(   0.0f, 20.0f, -200.0f),
+			new Vector3(  90.0f, 45.0f, -340.0f),
+			new Vector3(-130.0f, 15.0f, -300.0f),
+			new Vector3( 160.0f, 65.0f, -520.0f),
+			new Vector3( -70.0f, 35.0f, -560.0f),
+			new Vector3(  50.0f, 25.0f, -720.0f),
+		};
+		float[] sizes = { 40.0f, 60.0f, 30.0f, 70.0f, 35.0f, 50.0f };
+		Color[] tints =
+		{
+			new Color(1.0f, 0.2f, 0.6f),   // magenta
+			new Color(1.0f, 0.55f, 0.1f),  // orange
+			new Color(0.4f, 1.0f, 0.5f),   // green
+			new Color(0.6f, 0.4f, 1.0f),   // violet
+			new Color(1.0f, 0.85f, 0.2f),  // amber
+			new Color(0.2f, 0.8f, 1.0f),   // cyan
+		};
+
+		for (int i = 0; i < pos.Length; i++)
+		{
+			float s = sizes[i];
+			var body = new StaticBody3D { Name = $"Obstacle{i}" };
+			body.PhysicsMaterialOverride = bounceMat;
+
+			var col = new CollisionShape3D { Name = "Col" };
+			col.Shape = new BoxShape3D { Size = new Vector3(s, s, s) };
+			body.AddChild(col);
+
+			var mi = new MeshInstance3D { Name = "Mesh" };
+			mi.Mesh = new BoxMesh { Size = new Vector3(s, s, s) };
+			var mat = new StandardMaterial3D();
+			mat.AlbedoColor = tints[i] * 0.3f;
+			mat.EmissionEnabled = true;
+			mat.Emission = tints[i];
+			mat.EmissionEnergyMultiplier = 2.0f;
+			mi.MaterialOverride = mat;
+			body.AddChild(mi);
+
+			body.Position = pos[i];
+			field.AddChild(body);
+		}
 	}
 
 	// Spawns the in-run telemetry HUD (no scoring / game-over in the reframe).
@@ -130,6 +209,16 @@ public partial class Game : Node3D
 		_wasBoosting = accelerating;
 	}
 
+	// Collision juice: the moment the car takes a dent, punch the camera + play the crash thud + a warm
+	// impact flash. Scaled by the hit's damage so a graze is a tap and a full-speed ram is a wallop. (The
+	// game never ends — this is feedback, not failure.)
+	private void OnShipDamaged(float amount)
+	{
+		_rig?.AddShake(Mathf.Clamp(amount * 0.04f, 0.15f, 1.0f) * ShakeOnImpact);
+		AudioManager.Instance?.Crash();
+		_fx?.Flash(Mathf.Clamp(amount * 0.02f, 0.0f, 0.6f), new Color(1.0f, 0.4f, 0.3f));
+	}
+
 	public override void _Process(double delta)
 	{
 		// Keep the reference ground centred under the ship (open world: follow on both X and Z).
@@ -145,19 +234,27 @@ public partial class Game : Node3D
 	private int CfgInt(string section, string key, int fallback) => Config.Instance != null ? Config.Instance.GetInt(section, key, fallback) : fallback;
 	private bool CfgBool(string section, string key, bool fallback) => Config.Instance != null ? Config.Instance.GetBool(section, key, fallback) : fallback;
 
-	// Pushes the config-driven ship tunables onto the ship before it enters the tree, so _Ready()
-	// initialises with them. The speed model lives in settings.cfg [ship]; each falls back to the
-	// ship's own export default when the key is absent.
-	private void ApplyShipConfig(Ship ship)
+	// Pushes the config-driven flight tunables onto the car before it enters the tree, so _Ready()
+	// initialises with them. The force-based 6-DOF model lives in settings.cfg [flight]; each falls back
+	// to the ship's own export default when the key is absent. ([damage] is NOT pushed here — the
+	// DamageComponent self-reads it, since the ship creates that child during its own _Ready.)
+	private void ApplyFlightConfig(Ship ship)
 	{
-		ship.BaseSpeed = CfgFloat("ship", "base_speed", ship.BaseSpeed);
-		ship.MinSpeed = CfgFloat("ship", "min_speed", ship.MinSpeed);
-		ship.MaxSpeed = CfgFloat("ship", "max_speed", ship.MaxSpeed);
-		ship.AccelerateRate = CfgFloat("ship", "accelerate_rate", ship.AccelerateRate);
-		ship.DecelerateRate = CfgFloat("ship", "decelerate_rate", ship.DecelerateRate);
-		ship.ClimbAngleDeg = CfgFloat("ship", "climb_angle_deg", ship.ClimbAngleDeg);
-		ship.InvertPitch = CfgBool("ship", "invert_pitch", ship.InvertPitch);
-		ship.InvertBank = CfgBool("ship", "invert_bank", ship.InvertBank);
+		ship.MaxSpeed         = CfgFloat("flight", "max_speed", ship.MaxSpeed);
+		ship.ThrustForce      = CfgFloat("flight", "thrust_force", ship.ThrustForce);
+		ship.BrakeForce       = CfgFloat("flight", "brake_force", ship.BrakeForce);
+		ship.BodyMass         = CfgFloat("flight", "mass", ship.BodyMass);
+		ship.PitchTorque      = CfgFloat("flight", "pitch_torque", ship.PitchTorque);
+		ship.YawTorque        = CfgFloat("flight", "yaw_torque", ship.YawTorque);
+		ship.RollTorque       = CfgFloat("flight", "roll_torque", ship.RollTorque);
+		ship.LevelStrength    = CfgFloat("flight", "level_strength", ship.LevelStrength);
+		ship.LevelDamping     = CfgFloat("flight", "level_damping", ship.LevelDamping);
+		ship.BankCoordination = CfgFloat("flight", "bank_coordination", ship.BankCoordination);
+		ship.LinearDampValue  = CfgFloat("flight", "linear_damp", ship.LinearDampValue);
+		ship.AngularDampValue = CfgFloat("flight", "angular_damp", ship.AngularDampValue);
+		ship.Bounce           = CfgFloat("flight", "bounce", ship.Bounce);
+		ship.InvertPitch      = CfgBool("flight", "invert_pitch", ship.InvertPitch);
+		ship.InvertRoll       = CfgBool("flight", "invert_roll", ship.InvertRoll);
 	}
 
 	// Pushes the config-driven camera tunables onto the rig before it enters the tree, so _Ready()
@@ -335,7 +432,9 @@ public partial class Game : Node3D
 		AddAction("steer_down", new[] { Key.S, Key.Down });
 		AddAction("accelerate", new[] { Key.Shift, Key.Space });
 		AddAction("decelerate", new[] { Key.Ctrl, Key.X, Key.C, Key.V });
-		AddAction("cycle_camera", new[] { Key.Q });
+		AddAction("roll_left", new[] { Key.Q });           // 6-DOF roll (Task 2)
+		AddAction("roll_right", new[] { Key.E });
+		AddAction("cycle_camera", new[] { Key.Tab });      // moved off Q (now roll_left); CameraRig reads the action, not the key
 		AddAction("restart", new[] { Key.R });
 		AddAction("toggle_fullscreen", new[] { Key.F });
 		AddAction("quit", new[] { Key.Escape });

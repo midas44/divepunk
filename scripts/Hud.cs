@@ -13,6 +13,8 @@ public partial class Hud : CanvasLayer
 	private Label _hspdVal;         // ...and its digital m/s readout
 	private ColorRect _vspdFill;    // vertical (climb/dive) speed bar
 	private Label _vspdVal;         // ...and its digital m/s readout
+	private ColorRect _condFill;    // condition (damage) bar
+	private Label _condVal;         // ...and its digital % readout
 
 	private const float BoostBarW = 260.0f;
 
@@ -52,6 +54,11 @@ public partial class Hud : CanvasLayer
 			_vspdFill.Color = new Color(0.95f, 0.55f, 0.2f);
 		else
 			_vspdFill.Color = new Color(0.4f, 0.45f, 0.55f);
+
+		float c = _ship.GetConditionRatio();
+		_condFill.Size = new Vector2(BoostBarW * Mathf.Clamp(c, 0.0f, 1.0f), _condFill.Size.Y);
+		_condFill.Color = new Color(Mathf.Lerp(0.95f, 0.3f, c), Mathf.Lerp(0.25f, 0.9f, c), 0.35f);  // red→green as it fills
+		_condVal.Text = $"{c * 100.0f:F0}%";
 	}
 
 	private void Build()
@@ -95,6 +102,10 @@ public partial class Hud : CanvasLayer
 		var vspd = MakeMeter(root, -156.0f, "V-SPD", new Color(0.4f, 0.45f, 0.55f));
 		_vspdFill = vspd.Fill;
 		_vspdVal = vspd.Val;
+		// Condition (damage) read-out — green when healthy, red as it drops. 0% never ends the game.
+		var cond = MakeMeter(root, -212.0f, "CONDITION", new Color(0.3f, 0.9f, 0.5f));
+		_condFill = cond.Fill;
+		_condVal = cond.Val;
 	}
 
 	// Builds one labelled bar + digital readout in the bottom-left stack (barY is measured up from
