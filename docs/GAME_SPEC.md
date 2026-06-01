@@ -264,7 +264,7 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 ### Task 1 — Scaffolding & removals
 - [ ] Delete `autoload/ScoreManager.cs` (+ its `project.godot` autoload line), `scripts/GameOver.cs`, `scripts/ChunkManager.cs`, and the two dead `.tscn`s.
 - [ ] Scrub score / near-miss / combo / crash→game-over / corridor-clamp / streaming from `Game.cs`, `Hud.cs`, `Ship.cs`.
-- [ ] Restructure `settings/settings.cfg` (new `[world]`/`[flight]`/`[damage]`; drop `[corridor]`/`[streaming]`/score keys; keep `[display]`/`[camera]`/`[audio]`/`[fx]`). *Re-read it immediately before editing, preserve carried-over tuned values, stage it explicitly.*
+- [ ] Trim `settings/settings.cfg`: drop the obsolete `[corridor]`/`[streaming]` sections; keep the rest intact. *(The new `[flight]`/`[damage]`/`[world]` sections land with their code in Tasks 2–3.)* Re-read it immediately before editing, preserve tuned values, stage it explicitly (`settings/settings.cfg` only, never `git add -A`).
 - [ ] `Game.cs` spawns car + camera + environment + a flat ground void (the car stays `CharacterBody3D` **for this task only**).
 - **Goal:** boots clean, fly the void with a speed HUD, **no game-over possible**.
 
