@@ -275,8 +275,8 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - **Goal:** 6-DOF self-stabilizing flight feels **great**; ramming a box bounces realistically + drops condition + **never ends the game**; releasing the stick re-levels. *Do not proceed until this feels right (the M1 gate).*
 
 ### Task 3 — World data + bake pipeline *(riskiest; pure data, no rendering)*
-- [ ] Add `WorldData` / `PlacedObject` / `ObjectType`, `WorldGenerator` (heightmap + coastline/bay/island/mountain masks + biome map + deterministic object placement on the city plateau).
-- [ ] Add `WorldBakeTool` (EditorScript) + a `run.sh bake` headless path + a headless validator.
+- [x] Add `WorldData` / `PlacedObject` / `ObjectType`, `WorldGenerator` (heightmap + coastline/bay/island/mountain masks + biome map + deterministic object placement on the city plateau).
+- [x] Add `WorldBakeTool` (EditorScript) + a `run.sh bake` headless path + a headless validator.
 - **Goal:** the bake writes `res://world/world_8km.res`; **same seed → identical bytes**; the validator prints sane counts.
 
 ### Task 4 — Runtime world load + tile-grid rendering *(joins Tasks 2 + 3)*
