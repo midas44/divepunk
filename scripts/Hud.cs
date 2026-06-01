@@ -1,15 +1,12 @@
 using Godot;
 
-// In-run HUD — DIVEPUNK, milestone M3. Score + combo multiplier + best (from the
-// ScoreManager autoload) and a boost-meter bar (polled from the ship each frame).
+// In-run telemetry HUD — DIVEPUNK. A throttle meter plus horizontal (forward) and vertical
+// (climb/dive) speed bars, polled from the ship each frame.
 // Presentation-only: it reads game state, never mutates it.
 [GlobalClass]
 public partial class Hud : CanvasLayer
 {
 	private Ship _ship;            // provides GetBoostMeter()
-	private Label _scoreLabel;
-	private Label _multLabel;
-	private Label _bestLabel;
 	private ColorRect _boostFill;
 	private ColorRect _boostBg;
 	private ColorRect _hspdFill;    // horizontal (forward) speed bar
@@ -23,27 +20,6 @@ public partial class Hud : CanvasLayer
 	{
 		Layer = 50;
 		Build();
-		ScoreManager sm = ScoreManager.Instance;
-		sm.ScoreChanged += OnScoreChanged;
-		sm.HighScoreChanged += OnHighScoreChanged;
-		sm.NearMissRegistered += OnNearMiss;
-		OnScoreChanged(sm.GetScore(), sm.Multiplier);
-		OnHighScoreChanged(sm.HighScore);
-	}
-
-	public override void _ExitTree()
-	{
-		// ScoreManager is a persistent autoload, so a scene reload (restart) would otherwise leave
-		// this freed HUD's handlers connected to it — and ScoreManager.Tick() emits ScoreChanged every
-		// frame, calling into our disposed labels (ObjectDisposedException). GDScript auto-disconnects
-		// a signal when its receiver node is freed; C# does not, so do it explicitly here.
-		ScoreManager sm = ScoreManager.Instance;
-		if (sm != null)
-		{
-			sm.ScoreChanged -= OnScoreChanged;
-			sm.HighScoreChanged -= OnHighScoreChanged;
-			sm.NearMissRegistered -= OnNearMiss;
-		}
 	}
 
 	public void SetShip(Ship s)
@@ -78,55 +54,12 @@ public partial class Hud : CanvasLayer
 			_vspdFill.Color = new Color(0.4f, 0.45f, 0.55f);
 	}
 
-	private void OnScoreChanged(int score, float multiplier)
-	{
-		_scoreLabel.Text = score.ToString("D8");
-		_multLabel.Text = $"x{multiplier:F1}";
-		// Emphasise a live combo.
-		_multLabel.AddThemeColorOverride("font_color",
-			multiplier > 1.05f ? new Color(1.0f, 0.85f, 0.2f) : new Color(0.5f, 0.55f, 0.65f));
-	}
-
-	private void OnHighScoreChanged(int highScore)
-	{
-		_bestLabel.Text = $"BEST  {highScore:D8}";
-	}
-
-	private void OnNearMiss(float multiplier)
-	{
-		// A quick pop on the multiplier label for juice (deepened in M4).
-		_multLabel.Scale = new Vector2(1.4f, 1.4f);
-		CreateTween().TweenProperty(_multLabel, "scale", Vector2.One, 0.25);
-	}
-
 	private void Build()
 	{
 		var root = new Control();
 		root.SetAnchorsPreset(Control.LayoutPreset.FullRect);
 		root.MouseFilter = Control.MouseFilterEnum.Ignore;
 		AddChild(root);
-
-		// Score (top-left) + multiplier beneath it.
-		_scoreLabel = new Label();
-		_scoreLabel.Position = new Vector2(28, 20);
-		_scoreLabel.AddThemeFontSizeOverride("font_size", 44);
-		_scoreLabel.AddThemeColorOverride("font_color", new Color(0.85f, 0.95f, 1.0f));
-		root.AddChild(_scoreLabel);
-
-		_multLabel = new Label();
-		_multLabel.Position = new Vector2(30, 74);
-		_multLabel.PivotOffset = new Vector2(0, 16);
-		_multLabel.AddThemeFontSizeOverride("font_size", 32);
-		root.AddChild(_multLabel);
-
-		// Best (top-right).
-		_bestLabel = new Label();
-		_bestLabel.AnchorLeft = 1.0f;
-		_bestLabel.AnchorRight = 1.0f;
-		_bestLabel.Position = new Vector2(-260, 28);
-		_bestLabel.AddThemeFontSizeOverride("font_size", 24);
-		_bestLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.65f, 0.8f));
-		root.AddChild(_bestLabel);
 
 		// Boost meter (bottom-left): label + background + fill.
 		var boostLabel = new Label();

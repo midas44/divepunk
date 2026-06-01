@@ -1,56 +1,36 @@
 using Godot;
 
-// Root bootstrap — DIVEPUNK, milestones M0–M3.
+// Root bootstrap — DIVEPUNK (open-world reframe).
 //
 // Attach to the root Node3D of Main.tscn and press Play. It self-assembles a runnable
-// scene (ship + chase camera + minimal night environment + streaming city + UI), registers
-// the input actions in code (so the project runs with zero manual setup), and handles
-// restart and the crash -> game-over flow.
+// scene (ship + chase camera + minimal environment + a flat ground void + telemetry HUD)
+// and registers the input actions in code, so the project runs with zero manual setup.
 //
 // As you build real, hand-authored scenes you can delete the auto-spawn helpers below
 // and place the nodes directly in the scene tree instead.
 public partial class Game : Node3D
 {
-	private static readonly PackedScene ChunkManagerScene = GD.Load<PackedScene>("res://scenes/world/ChunkManager.tscn");
-	private static readonly PackedScene GameOverScene = GD.Load<PackedScene>("res://scenes/ui/GameOver.tscn");
 	private static readonly PackedScene HudScene = GD.Load<PackedScene>("res://scenes/ui/HUD.tscn");
 	private static readonly Shader SkyShader = GD.Load<Shader>("res://shaders/sky.gdshader");   // procedural neon cloud sky (M4 view pass)
 
 	[ExportGroup("Juice")]
-	[Export] public float ShakeOnNearMiss = 0.25f;
-	[Export] public float ShakeOnCrash = 1.0f;
 	[Export] public float ShakeOnBoost = 0.35f;            // camera punch the moment a boost kicks in
-	[Export] public bool EnableNearMissFlash = true;       // screen flash on a near-miss (from [fx] near_miss_flash)
-	[Export] public float NearMissFlashAmount = 0.35f;     // strength of that flash (0..1)
-	[Export] public float CrashFlashAmount = 1.0f;         // red flash on a crash
-	[Export] public float NearMissTimeScale = 0.9f;        // brief slow-mo factor on a near-miss (1.0 = off; from [fx] time_dilation)
-	[Export] public float TimeDilationDuration = 0.12f;    // seconds (real time) the slow-mo holds before easing back
-	[Export] public float TimeDilationCooldown = 0.35f;    // min real seconds between dips, so a chain can't lock slow-mo on
 
 	private Ship _ship;
 	private CameraRig _rig;
-	private ChunkManager _mgr;
-	private Traffic _traffic;
 	private ScreenFX _fx;
-	private GameOver _gameOver;
 	private Hud _hud;
 	private MeshInstance3D _ground;
 
 	private bool _wasBoosting = false;
-	private float _tdTimer = 0.0f;       // remaining real-time slow-mo (s)
-	private float _tdCooldown = 0.0f;    // remaining real-time cooldown before another dip (s)
 
 	public override void _Ready()
 	{
 		RegisterInput();
-		Engine.TimeScale = 1.0;   // defensive: a prior run may have left a slow-mo dip active
-		EnableNearMissFlash = CfgBool("fx", "near_miss_flash", EnableNearMissFlash);
-		NearMissTimeScale = CfgFloat("fx", "time_dilation", NearMissTimeScale);
+		Engine.TimeScale = 1.0;        // defensive: clear any leftover slow-mo
 		CaptureMouse();
 		EnsureEnvironment();
 		SpawnShipAndCamera();
-		SpawnWorld();
-		SpawnTraffic();
 		SpawnUi();
 		SpawnScreenFx();
 		AudioManager.Instance?.StartMusic();
@@ -105,79 +85,18 @@ public partial class Game : Node3D
 		}
 
 		_rig.SetTarget(_ship);
-		_ship.Crashed += OnShipCrashed;
-		_ship.NearMiss += OnShipNearMiss;
 		_ship.SpeedChanged += OnShipSpeedChanged;
 	}
 
-	// Spawns the M2 streaming city around the ship. World seed + debug flags come from the
-	// Config autoload (edit settings/settings.cfg to change them).
-	private void SpawnWorld()
-	{
-		if (GetNodeOrNull("ChunkManager") != null)
-			return;
-		_mgr = ChunkManagerScene.Instantiate<ChunkManager>();
-		_mgr.Name = "ChunkManager";
-		_mgr.WorldSeed = CfgInt("game", "seed", 0);
-		_mgr.LogStreaming = CfgBool("debug", "log_streaming", false);
-		_mgr.WorldScale = CfgFloat("game", "scale", 2.0f);
-		_mgr.CorridorHalfWidth = CfgFloat("corridor", "half_width", _mgr.CorridorHalfWidth);
-		_mgr.CorridorFloor = CfgFloat("corridor", "floor", _mgr.CorridorFloor);
-		_mgr.CorridorCeiling = CfgFloat("corridor", "ceiling", _mgr.CorridorCeiling);
-		// Streaming / draw distance (the "view area" lever): chunks_ahead × chunk_length metres of city.
-		// Set before AddChild so _Ready() sizes the chunk pool from them.
-		_mgr.ChunkLength = CfgFloat("streaming", "chunk_length", _mgr.ChunkLength);
-		_mgr.ChunksAhead = CfgInt("streaming", "chunks_ahead", _mgr.ChunksAhead);
-		_mgr.ChunksBehind = CfgInt("streaming", "chunks_behind", _mgr.ChunksBehind);
-		_mgr.BuildsPerFrame = CfgInt("streaming", "builds_per_frame", _mgr.BuildsPerFrame);
-		_mgr.BuildingWindows = CfgBool("fx", "building_windows", _mgr.BuildingWindows);
-		_mgr.HazardPulse = CfgBool("fx", "hazard_pulse", _mgr.HazardPulse);
-		AddChild(_mgr);
-		_mgr.SetTarget(_ship);
-	}
-
-	// Spawns the moving traffic (a live hazard) once the ship exists. Config lives in
-	// settings.cfg [traffic]; corridor extents come from [corridor]; the seed from [game].
-	private void SpawnTraffic()
-	{
-		if (GetNodeOrNull("Traffic") != null)
-			return;
-		_traffic = new Traffic { Name = "Traffic" };
-		ApplyTrafficConfig(_traffic);   // config exports BEFORE AddChild so _Ready() builds the pool with them
-		AddChild(_traffic);
-		_traffic.SetTarget(_ship);
-	}
-
-	private void ApplyTrafficConfig(Traffic t)
-	{
-		t.CarCount = CfgInt("traffic", "count", t.CarCount);
-		t.MinSpeed = CfgFloat("traffic", "min_speed", t.MinSpeed);
-		t.MaxSpeed = CfgFloat("traffic", "max_speed", t.MaxSpeed);
-		t.TowardFraction = CfgFloat("traffic", "toward_fraction", t.TowardFraction);
-		t.CorridorHalfWidth = CfgFloat("corridor", "half_width", t.CorridorHalfWidth);
-		t.CorridorFloor = CfgFloat("corridor", "floor", t.CorridorFloor);
-		t.CorridorCeiling = CfgFloat("corridor", "ceiling", t.CorridorCeiling);
-		t.HazardPulse = CfgBool("fx", "hazard_pulse", t.HazardPulse);
-		t.WorldSeed = CfgInt("game", "seed", 0);
-	}
-
-	// Spawns the UI overlays: the in-run HUD and the Game Over screen. A fresh ScoreManager
-	// run is started here so a scene reload (restart) zeroes the score.
+	// Spawns the in-run telemetry HUD (no scoring / game-over in the reframe).
 	private void SpawnUi()
 	{
 		if (GetNodeOrNull("HUD") != null)
 			return;
-		ScoreManager.Instance.ResetRun();
-
 		_hud = HudScene.Instantiate<Hud>();
 		_hud.Name = "HUD";
 		AddChild(_hud);
 		_hud.SetShip(_ship);
-
-		_gameOver = GameOverScene.Instantiate<GameOver>();
-		_gameOver.Name = "GameOver";
-		_gameOver.Layer = 100;   // above the screen-FX (30) and HUD (50) layers so it's never distorted
-		AddChild(_gameOver);
 	}
 
 	// Spawns the fullscreen screen-FX layer (speed lines + chromatic aberration/vignette). Toggles
@@ -213,88 +132,12 @@ public partial class Game : Node3D
 
 	public override void _Process(double delta)
 	{
-		// Drive the score: distance is how far the ship has flown (-Z), plus the decaying combo.
-		if (_ship != null)
+		// Keep the reference ground centred under the ship (open world: follow on both X and Z).
+		if (_ship != null && _ground != null)
 		{
-			ScoreManager.Instance.SetDistance(-_ship.GlobalPosition.Z);
-			// Slide the (uniform) reflective ground with the ship so the now-long, thin-fog view never reaches its edge.
-			if (_ground != null)
-			{
-				Vector3 gp = _ground.GlobalPosition;
-				gp.Z = _ship.GlobalPosition.Z;
-				_ground.GlobalPosition = gp;
-			}
+			Vector3 gp = _ship.GlobalPosition;
+			_ground.GlobalPosition = new Vector3(gp.X, 0.0f, gp.Z);
 		}
-		ScoreManager.Instance.Tick(delta);
-		// Ease any active near-miss slow-mo, using REAL time (recovered from the scaled frame delta).
-		UpdateTimeDilation(delta / System.Math.Max(Engine.TimeScale, 0.001));
-	}
-
-	private void OnShipNearMiss()
-	{
-		ScoreManager.Instance.RegisterNearMiss();
-		if (_rig != null)
-			_rig.AddShake(ShakeOnNearMiss);
-		if (_fx != null && EnableNearMissFlash)
-			_fx.Flash(NearMissFlashAmount, new Color(0.5f, 0.9f, 1.0f));
-		TriggerTimeDilation();
-		AudioManager.Instance?.NearMiss();
-	}
-
-	private void OnShipCrashed()
-	{
-		bool isBest = ScoreManager.Instance.EndRun();
-		GD.Print($"[DIVEPUNK] crashed — score {ScoreManager.Instance.GetScore()} (best {ScoreManager.Instance.HighScore}{(isBest ? ", NEW BEST" : "")})");
-		if (_rig != null)
-			_rig.AddShake(ShakeOnCrash);
-		if (_fx != null)
-		{
-			_fx.Flash(CrashFlashAmount, new Color(1.0f, 0.3f, 0.2f));   // red impact flash
-			_fx.SetSpeedRatio(0.0f);                                    // kill the speed lines / aberration
-			_fx.SetBoost(false);
-		}
-		ResetTimeScale();                                               // the game-over screen runs at normal speed
-		AudioManager.Instance?.Crash();
-		if (_gameOver != null)
-			_gameOver.ShowOver(ScoreManager.Instance.GetScore(), ScoreManager.Instance.HighScore, isBest);
-	}
-
-	// Brief "bullet-time" dip on a near-miss (juice, spec §5.2). Bounded by a cooldown so a fast
-	// near-miss chain can't lock the game in slow-mo. NearMissTimeScale = 1.0 disables it.
-	private void TriggerTimeDilation()
-	{
-		if (NearMissTimeScale >= 0.999f || _tdCooldown > 0.0f)
-			return;
-		_tdTimer = TimeDilationDuration;
-		_tdCooldown = TimeDilationCooldown;
-	}
-
-	// Holds Engine.TimeScale at the dip for its duration, then eases back to 1.0. Driven with REAL
-	// delta (passed in) so its own timing is independent of the slow-mo it applies.
-	private void UpdateTimeDilation(double realDelta)
-	{
-		float rd = (float)realDelta;
-		if (_tdCooldown > 0.0f)
-			_tdCooldown = Mathf.Max(0.0f, _tdCooldown - rd);
-		if (_tdTimer > 0.0f)
-		{
-			_tdTimer = Mathf.Max(0.0f, _tdTimer - rd);
-			Engine.TimeScale = NearMissTimeScale;
-		}
-		else if (!Mathf.IsEqualApprox((float)Engine.TimeScale, 1.0f))
-		{
-			Engine.TimeScale = Mathf.Lerp((float)Engine.TimeScale, 1.0f, 1.0f - Mathf.Exp(-12.0f * rd));
-			if (Mathf.Abs((float)Engine.TimeScale - 1.0f) < 0.01f)
-				Engine.TimeScale = 1.0;
-		}
-	}
-
-	// Snap time back to normal (on crash / before the game-over screen).
-	private void ResetTimeScale()
-	{
-		_tdTimer = 0.0f;
-		_tdCooldown = 0.0f;
-		Engine.TimeScale = 1.0;
 	}
 
 	// Safe read from the Config autoload (falls back to the default if it isn't present).
@@ -303,8 +146,7 @@ public partial class Game : Node3D
 	private bool CfgBool(string section, string key, bool fallback) => Config.Instance != null ? Config.Instance.GetBool(section, key, fallback) : fallback;
 
 	// Pushes the config-driven ship tunables onto the ship before it enters the tree, so _Ready()
-	// initialises with them. The speed model lives in settings.cfg [ship]; the flyable corridor's
-	// horizontal half-width and vertical floor/ceiling live in [corridor]. Each falls back to the
+	// initialises with them. The speed model lives in settings.cfg [ship]; each falls back to the
 	// ship's own export default when the key is absent.
 	private void ApplyShipConfig(Ship ship)
 	{
@@ -316,9 +158,6 @@ public partial class Game : Node3D
 		ship.ClimbAngleDeg = CfgFloat("ship", "climb_angle_deg", ship.ClimbAngleDeg);
 		ship.InvertPitch = CfgBool("ship", "invert_pitch", ship.InvertPitch);
 		ship.InvertBank = CfgBool("ship", "invert_bank", ship.InvertBank);
-		ship.BoundX = CfgFloat("corridor", "half_width", ship.BoundX);
-		ship.BoundYMin = CfgFloat("corridor", "floor", ship.BoundYMin);
-		ship.BoundYMax = CfgFloat("corridor", "ceiling", ship.BoundYMax);
 	}
 
 	// Pushes the config-driven camera tunables onto the rig before it enters the tree, so _Ready()
@@ -333,21 +172,7 @@ public partial class Game : Node3D
 		rig.BaseFov = CfgFloat("camera", "base_fov", rig.BaseFov);
 		rig.MaxFov = CfgFloat("camera", "max_fov", rig.MaxFov);
 		rig.NearDistance = CfgFloat("camera", "near", rig.NearDistance);
-		// The far clip must cover the streamed city, or this plane (not the fog) chops the far edge.
-		// Auto-size it from the [streaming] knobs so raising chunks_ahead/behind "just works" with no
-		// second edit; a manually-set [camera] far that's LARGER still wins (e.g. to see past the fog).
-		float manualFar = CfgFloat("camera", "far", rig.FarDistance);
-		rig.FarDistance = Mathf.Max(manualFar, CityDrawDistance() * 1.15f + 1000.0f);
-	}
-
-	// Farthest extent of the streamed city ahead/behind the ship (m) = the longer run × chunk length.
-	// Drives the auto-sized camera far clip above so the clip plane never cuts the city before the fog.
-	private float CityDrawDistance()
-	{
-		float clen = CfgFloat("streaming", "chunk_length", 200.0f);
-		int ahead = CfgInt("streaming", "chunks_ahead", 72);
-		int behind = CfgInt("streaming", "chunks_behind", 72);
-		return (float)(Mathf.Max(ahead, behind) + 1) * clen;
+		rig.FarDistance = CfgFloat("camera", "far", rig.FarDistance);
 	}
 
 	private void EnsureEnvironment()
@@ -373,14 +198,14 @@ public partial class Game : Node3D
 
 		if (GetNodeOrNull("RefGround") == null)
 		{
-			// A long, near-black WET street: low roughness + a little metal so SSR mirrors the neon
+			// A near-black WET street plane: low roughness + a little metal so SSR mirrors the neon
 			// skyline in it (spec §7.7, wet-street reflections). Reads as dark glass when SSR is off.
-			// Stored as _ground and slid along with the ship each frame (see _Process) so the long
-			// thin-fog view never flies off its edge.
+			// Stored as _ground and re-centred under the ship each frame (see _Process) so the open
+			// void always has a floor beneath you wherever you fly.
 			var ground = new MeshInstance3D();
 			ground.Name = "RefGround";
 			var plane = new PlaneMesh();
-			plane.Size = new Vector2(8000.0f, 48000.0f);
+			plane.Size = new Vector2(20000.0f, 20000.0f);
 			ground.Mesh = plane;
 			var gm = new StandardMaterial3D();
 			gm.AlbedoColor = new Color(0.012f, 0.016f, 0.03f);

@@ -37,7 +37,7 @@ public partial class AudioManager : Node
 
 	private void ReadConfig()
 	{
-		// Config._Ready has already run (autoload order: Config -> ScoreManager -> AudioManager),
+		// Config._Ready has already run (autoload order: Config -> AudioManager),
 		// but stay defensive — audio is optional and must not hard-depend on Config existing.
 		Config cfg = Config.Instance;
 		if (cfg != null)
