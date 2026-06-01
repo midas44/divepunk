@@ -40,6 +40,7 @@ Usage: ./run.sh [command]
   editor          Open the project in the Godot editor
   build           Compile the C# solution (dotnet build -c Debug) — run before headless
   check           Headless smoke-test: import, run 180 frames, quit (exit 0 = OK)
+  bake            Headless bake of the world -> res://world/world_8km.res (run build first)
   import          Headless import only (regenerate .godot/)
   export-linux    Export release Linux  -> $BUILD_DIR/divepunk.x86_64
   export-android  Export release Android -> $BUILD_DIR/divepunk.apk
@@ -68,6 +69,13 @@ case "$cmd" in
 		echo ":: booting main scene (180 frames)..."
 		"$GODOT_BIN" --headless --path . "$MAIN_SCENE" --quit-after 180
 		echo ":: boot OK (exit 0)"
+		;;
+	bake)
+		echo ":: importing..."
+		"$GODOT_BIN" --headless --path . --import
+		echo ":: baking world -> res://world/world_8km.res ..."
+		"$GODOT_BIN" --headless --path . res://scenes/tools/Bake.tscn --quit-after 600
+		echo ":: bake done"
 		;;
 	import)
 		exec "$GODOT_BIN" --headless --path . --import
