@@ -1,19 +1,35 @@
-# DIVEPUNK — Project Spec & MVP Plan
+# DIVEPUNK — Project Spec & Roadmap
 
-> **Working title:** DIVEPUNK *(chosen — verify store, trademark, and domain availability before commercial launch)*
-> **Genre:** High-speed arcade flyer / score-attack, set in a procedurally generated cyberpunk megacity
-> **Status:** Pre-production. This document is the north star for the build. Implement it milestone by milestone (see [Roadmap](#9-development-roadmap)).
-> **How to use this file:** Keep it in `docs/GAME_SPEC.md` and reference it from a lean `CLAUDE.md` (see [Working with Claude Code](#10-working-with-claude-code)).
+> **Working title:** DIVEPUNK *(verify store, trademark, and domain availability before commercial launch)*
+> **Genre:** Open-world flying-car sandbox set in a fixed, hand-reproducible cyberpunk coastal city at dusk.
+> **Status:** Reframing in progress (2026-06). This document is the north star — implement it task by task (see [Roadmap](#9-development-roadmap)).
+> **How to use this file:** Keep it in `docs/GAME_SPEC.md` and reference it from a lean `CLAUDE.md`.
+
+> **⚠️ This is a reframe.** DIVEPUNK began as an *infinite arcade score-corridor flyer* (streamed neon
+> corridor, 3-DOF tube-clamped ship, crash = game over, distance/combo scoring). It is being rebuilt
+> into a **bounded, pre-baked open-world flying-car sandbox**. Much of the old code is reused (city
+> geometry, shaders, camera, audio, config); the corridor, streaming, scoring, and game-over are gone.
+> See the [Reuse/rewrite/delete](#8-migration--reuse--rewrite--delete) table.
 
 ---
 
 ## 1. Vision & Differentiation
 
-You pilot a flying car at exhilarating speed through the canyons of an endless, dynamically generated neon megacity. The fantasy is **flow + speed + danger**: threading gaps between skyscrapers, skimming traffic, and chaining near-misses while the city blurs past in a wash of neon and fog.
+You own a flying car in a **fixed, finite, lovingly-built cyberpunk city on a California-like ocean
+coast at golden-purple dusk.** You can fly **anywhere** — thread the neon canyons downtown, skim the
+bay, buzz the islands, climb to the desert hills ringing the basin. The car obeys **real physics**:
+bump a tower or the ground and you take **measurable damage and bounce off** — but you are never
+killed, never "game-over'd," never kicked back to a menu. The world is a **place you inhabit**, not a
+gauntlet you survive.
 
-**The hook / what makes it different.** The closest existing game is *Cloudpunk* — beautiful, but a slow, narrative, atmospheric drive. DIVEPUNK deliberately occupies the opposite end: **fast, arcadey, run-based, score-chasing.** Think *Race the Sun* / *Distance* / *WipeOut* energy with a *Cloudpunk* skin and an "easy to play, hard to master" skill ceiling. That gap (high-speed neon flight, score-attack, mobile-friendly) appears genuinely under-served.
+**The shift from the original vision.** The old DIVEPUNK was *Race the Sun* / *Distance* energy —
+fast, run-based, score-chasing, fail-and-retry. The reframe trades that for **presence and freedom**:
+a persistent, reproducible world you explore at your own pace. Speed and neon stay in the DNA; the
+fail-loop and the procedural-novelty treadmill do not. Deeper gameplay (objectives, economy, traffic
+AI, mission structure) layers on top later — the foundation is *a great-feeling car in a beautiful,
+solid, open world.*
 
-**Design north star:** *Every run should make the player think "one more, I can do better."*
+**Design north star:** *Flying around this city should feel good enough that you do it for its own sake.*
 
 ---
 
@@ -21,264 +37,306 @@ You pilot a flying car at exhilarating speed through the canyons of an endless, 
 
 | | Detail |
 |---|---|
-| **MVP platforms** | Linux (desktop) + Android |
-| **Primary dev platform** | Linux desktop (fastest iteration) |
-| **Stretch platforms** | Windows, macOS, iOS, Web (all low-effort from this stack later) |
+| **Primary platform** | Linux desktop (Forward+), fastest iteration |
+| **Stretch platforms** | Windows, macOS (low-effort from this stack) |
+| **Android** | Deferred to a mature stage (the open-world memory/draw budget is a separate effort from the desktop look) |
 | **Orientation** | Landscape |
-| **Target framerate** | 60 FPS desktop; 60 FPS on mid-range Android (fall back to a capped 30 only if forced) |
+| **Target framerate** | 60 FPS desktop on the dev machine (RTX-class) |
 
-> ⚠️ **Mobile reality check:** the lavish desktop look and the Android look are *two different effect budgets*. Build the corridor and gameplay to look great with the desktop renderer, then dial effects down for the mobile renderer. Plan for this from the start — don't bolt it on at the end.
+> The world is **fixed and finite (≈8×8 km)**, so the perf model is "render a known city cheaply,"
+> not "stream an infinite one." That makes draw-call batching (MultiMesh) and distance culling the
+> levers, with fog hiding the cull boundary.
 
 ---
 
 ## 3. Technology Stack
 
-### Chosen stack
-- **Engine:** **Godot 4.6** (current stable, Jan 2026). MIT-licensed → zero fees/royalties, ideal for going commercial.
-- **Primary language:** **C# (.NET 8)** — ported from typed GDScript for a large CPU-performance headroom over the interpreted runtime, while keeping the Godot editor, text `.tscn` scenes, the Android export path, and an AI-friendly workflow. Needs the **.NET/Mono build** of Godot (`godot-mono`). (The game was prototyped in GDScript through M4; see `docs/MIGRATION_GDSCRIPT_TO_CSHARP.md` for the behaviour-preserving port.)
-- **Physics:** **Jolt** (the default 3D physics engine in 4.6) — deterministic and stable, good for arcade car feel. We mostly use it for *collision detection*, not full rigid-body simulation (see [Player Controller](#74-player-controller)).
-- **Rendering:** **Forward+** renderer on desktop/Linux; **Mobile** renderer for the Android export preset.
-- **Optional native acceleration:** **Rust via `godot-rust` / gdext (v0.5, 2026)** — *only if* profiling shows C# can't keep up with procedural generation. The GDExtension API has stayed backward-compatible since Godot 4.1, so this is far more stable than building the whole game in a pure-Rust engine. **Do not start here** — it slows iteration. Reach for it only when a profiler tells you to.
-- **Version control:** Git from commit zero. Add a `.gitignore` for Godot (`.godot/`, export builds, `rust/target/`).
-
-### Why not the alternatives (for *this* project)
-- **Bevy (pure Rust):** tempting given your Rust background, but it's pre-1.0 with constant breaking API changes (bad for AI-generated code, which goes stale fast) and weak, maintainer-acknowledged "not easy" Android support. Wrong fit for a vibe-coded, Android-MVP, commercial game. Revisit for a future Rust-first project.
-- **Unity:** viable again (runtime fee cancelled; Personal free under $200K revenue), but heavier, closed-source, and carries lingering licensing-trust risk. Keep as a fallback only if Godot's mobile renderer disappoints.
-- **Three.js / web + Capacitor:** maximally reuses your TS skills, but high-speed procedural 3D that stays beautiful is exactly the workload where mobile WebGL/WebGPU struggles. Fine for a quick prototype; shaky as a commercial mobile target.
-
-### Skills note
-C# is close to TypeScript (productive immediately), and the M0–M4 prototype phase used GDScript (also cheap to read). Your Rust expertise isn't wasted — it's the optional accelerator above. Nothing here throws away what you know.
+- **Engine:** **Godot 4.6** (stable, Jan 2026). MIT-licensed → zero fees/royalties.
+- **Language:** **C# (.NET 8 / `net8.0`)**, typed throughout. Needs the **.NET/Mono build** of Godot
+  (`godot-mono`). Ported from typed GDScript — conventions in `docs/MIGRATION_GDSCRIPT_TO_CSHARP.md`.
+- **Physics:** **Jolt** (the Godot 4.6 default). Now used for **real rigid-body simulation** of the
+  flying car (collision *response*, bounce, contact impulses), not just detection. Jolt allows
+  non-uniform `HeightMapShape3D` scaling (GodotPhysics does not) — relevant for terrain later.
+- **Rendering:** **Forward+** on desktop/Linux.
+- **3D models:** objects (buildings, cars, props) are **procedurally generated placeholders now**, and
+  will be swapped to **glTF 2.0 (`.glb`)** model files later through a `MeshRegistry` seam — **without
+  re-baking the world layout** (the bake stores placement + type, not geometry).
+- **Optional native acceleration:** Rust via godot-rust/gdext — *only if* a profiler proves C# is the
+  bottleneck. Do not start here.
+- **Version control:** Git from commit zero.
 
 ---
 
-## 4. Core Gameplay Loop
+## 4. The World
 
-```
-Spawn → auto-fly forward (speed ramps up) → steer to dodge buildings/obstacles
-      → chain near-misses to build combo + boost meter → spend boost for risky speed
-      → crash ends the run → see score + personal best → INSTANT restart → repeat
-```
+A single, authored, **deterministic-from-seed** world, **generated once and saved to disk**, then
+loaded at runtime. No per-run regeneration, no streaming ring buffer.
 
-A single run is short (target **60–180 seconds**) and ends in a crash. The player's own mistake is always obvious, so failure feels fair and fuels the retry.
+- **Size:** **≈8×8 km**, bounded, with **soft borders** (a restoring push-back force past the edge —
+  no invisible wall snap, no death).
+- **Layout (one coherent basin):**
+  - **City** on the **ocean coast** — the dense neon downtown the old generator already knows how to build, now placed on an open ground plane instead of along a corridor.
+  - **Ocean** with a **bay** carved into the coastline and **several islands**.
+  - **California-like desert** ringing the city: scrub flats rising to **hills/mountains on the horizon** (a raised rim that also reads as the world's natural boundary).
+  - **Beaches / coastline** transitioning city → water and desert → water.
+- **Sea level = world Y = 0.** Terrain below 0 is underwater; the city sits on a plateau above it.
+- **Biomes** (ocean, beach, city plateau, desert, hills) drive terrain colour/material and where
+  objects are placed.
 
----
+### The bake (data, not geometry)
+The world is serialized as a **binary Godot `Resource` (`res://world/world_8km.res`)** holding
+**layout data**, never baked meshes:
+- a **terrain heightmap** (normalised heights + resolution + min/max Y),
+- a coarse **biome map**,
+- an array of **object descriptors** (type + `Transform3D` + shader-channel colours + sub-seed).
 
-## 5. The Addiction Engine
-
-*(This is the heart of "what makes it interesting/addictive." Pillars are tagged **[MVP]** or **[Later]**. The MVP ones are non-negotiable — they ARE the fun.)*
-
-1. **Flow through speed mastery [MVP].** The fundamental pleasure. Tight, responsive controls + readable obstacles + high speed = flow state. Easy to be okay at; a high skill ceiling to chase. *If the flying doesn't feel good in an empty void, nothing else matters — so build and tune this first.*
-
-2. **Juice / game feel [MVP basic, Later deep].** The dopamine layer. Every action gets instant sensory payoff: screen shake, speed lines, FOV punch, a satisfying near-miss "whoosh" + flash + score popup, controller/haptic rumble. This is cheap to add and disproportionately responsible for "feel." Budget real time for it.
-
-3. **Risk/reward boost economy [MVP].** A **boost meter you fill by flying dangerously** (near-misses, skimming surfaces) and spend for a burst of speed. Faster = harder to survive AND higher scoring. Self-balancing tension that rewards bravery.
-
-4. **Score chains & multipliers [MVP].** A combo multiplier that climbs as you chain near-misses without crashing and **resets (or decays) on a hit or a timeout**. Creates "don't break the chain" tension. Style > raw distance.
-
-5. **Short runs + instant restart [MVP].** Sub-3-minute runs, zero-friction "Retry" (one tap, no load screen). The "one more go" loop lives or dies on restart speed.
-
-6. **Escalating intensity [MVP].** Base speed and obstacle density ramp over the run, so each attempt has a natural arc and a number to beat. Always a personal best in sight.
-
-7. **Procedural novelty [MVP] + Daily Seed [Later].** Procedural generation keeps every run fresh. **Later:** a shared *daily seed* so everyone worldwide races the same city today → instant competitive/social layer and a daily-return habit.
-
-8. **Meta-progression [Later].** Persistent unlocks between runs — ships, neon paint/skins, new city districts, run modifiers. Long-term goals beyond a single score. Roguelite-style "always earning something."
-
-9. **Leaderboards / ghosts [Later].** Global + friends leaderboards; later, race a ghost of your best run or a rival's. Powerful retention driver, pairs perfectly with the daily seed.
-
-10. **Audio-reactive world [Later — signature feature candidate].** The city pulses, and obstacles/lights sync, to the soundtrack (à la *Thumper* / *Tetris Effect* / *Audiosurf*). For a neon speed game this is a *massive* vibe multiplier and a strong differentiator. High effort — prototype it once the core is solid and decide whether it becomes the identity of the game.
-
-11. **Fairness via telegraphing [MVP].** Obstacles must be *readable at speed* — clear silhouettes, lead-in lighting, no unfair pop-in. Deaths must feel like the player's fault, or the retry loop breaks. This is a hard requirement, not polish.
+At runtime the loader instantiates meshes from those descriptors via a swappable
+**`ObjectType → Mesh/PackedScene` registry** — so upgrading a building from a procedural box to a glTF
+model is a one-line registry change with **zero re-bake**. `FormatVersion` guards stale bakes.
 
 ---
 
-## 6. MVP Definition
+## 5. Core Experience & Pillars
 
-**The MVP is one playable mode that proves the fun.** Ship exactly this — resist scope creep.
+*(The reframe is young; deeper gameplay is deferred. These are the foundations that must feel right.)*
 
-**In scope:**
-- One ship, one infinite procedurally-generated neon corridor.
-- Auto-forward flight with lateral + vertical steering, clamped to the corridor.
-- Speed ramps over the run; boost meter + boost burst.
-- Obstacles + collision (crash = game over).
-- Near-miss detection → score + combo multiplier + boost gain.
-- Distance + score HUD; local high score saved.
-- Instant restart.
-- Minimum-viable juice: speed lines, screen shake, glow/neon, FOV-on-speed, one music track + core SFX.
-- Runs at target framerate on Linux **and** one real Android device.
+1. **Great-feeling flight [now].** An assisted-arcade `RigidBody3D` flying car: thrust + 6 degrees of
+   freedom, but self-stabilizing (auto-leveling, coordinated banked turns) so it's a joy to fly, not a
+   wrestling match. *If the car doesn't feel great in an empty void, nothing else matters — build and
+   tune this first (the original "M1 gate" still rules).*
+2. **Solid, physical world [now].** Buildings, terrain, and the ground are **collidable**. Contact is
+   resolved by Jolt as a **realistic bounce**, scaled by impact.
+3. **Damage, not death [now].** Collisions accumulate **measurable damage** (a condition read-out on
+   the HUD) from contact impulse. **Health reaching zero does nothing yet** — no game-over, no reload.
+   Consequences (handling loss, forced landing, repair) come later.
+4. **A real place [now].** A **fixed, reproducible** city — the same world every launch — that rewards
+   learning its geography. Bounded and knowable, not an infinite treadmill.
+5. **Freedom of movement [now].** Fly in **all directions**, land anywhere, hover, skim the water,
+   crest the hills. No corridor, no rails, no forced forward motion.
+6. **Synthwave-dusk mood [now, polished later].** Golden-purple sunset over the bay; neon still glows;
+   desert and water stay warm and legible. Bridges cyberpunk and California.
+7. **Ambient life [soon].** Sparse AI traffic roaming the city — collidable, not a score hazard.
+8. **Deeper gameplay [later].** Objectives, economy, missions, factions, traffic behaviour, day/night
+   — all TBD once the sandbox feels good. Intentionally unscoped here.
 
-**Out of scope (post-MVP):** daily seed, leaderboards, meta-progression/unlocks, multiple ships, audio-reactivity, narrative, multiple biomes, monetization plumbing. (All are in [Section 5](#5-the-addiction-engine) / [Open Decisions](#11-open-decisions) for later.)
+---
 
-**Definition of Done (MVP):** A stranger can pick it up, immediately understand "go fast, don't crash, chain near-misses for points," play several runs in a row chasing a high score, and it runs smoothly on both target platforms.
+## 6. Current Scope
+
+**In scope (the reframe foundation):**
+- The bounded ≈8×8 km world, **baked once to disk** and loaded at runtime.
+- Coastal city (procedural placeholder geometry) + terrain (ocean/bay/islands/desert/hills) + water.
+- An assisted-arcade `RigidBody3D` flying car with full 6-DOF and **collision + bounce + damage**.
+- A condition (damage) HUD read-out. **No game-over.**
+- Synthwave-dusk aesthetic.
+- Sparse ambient AI traffic.
+- A glTF model-loading seam (proven on one or two object types).
+- Runs at 60 FPS on the dev desktop.
+
+**Out of scope (for now):** scoring/combos/leaderboards (removed), objectives/missions, economy,
+narrative, day/night cycle, weather, interiors, multiplayer, Android, monetization, real art assets
+(beyond proving the glTF seam).
+
+**Definition of Done (reframe foundation):** you can launch the game, fly a physics-driven car freely
+around a beautiful, fixed, solid 8 km coastal city at dusk, bump into things and take damage + bounce
+without ever being "killed," and the world is identical every time you launch.
 
 ---
 
 ## 7. Technical Architecture
 
-### 7.1 Chunk streaming (the backbone)
-The city is built from fixed-length **chunks** (e.g. 100m segments). A `ChunkManager` keeps a small window of chunks active around the player: spawn new chunks ahead as the player advances, recycle chunks that fall behind. **Use an object pool** — never instantiate/free per frame; reuse despawned chunks. Memory and GC stay flat regardless of how far the player flies.
+### 7.1 World bake pipeline — *data, not geometry*
+- **`WorldData : Resource` `[GlobalClass]`** — `FormatVersion`, `Seed`, `WorldExtent` (≈8000 m), a
+  terrain heightmap (`float[] Heights` 0–1 + `HeightmapResolution` + `MinY`/`MaxY`), a `byte[] Biomes`
+  map, and `Array<PlacedObject> Objects`.
+- **`PlacedObject : Resource` `[GlobalClass]`** — `ObjectType` enum, `Transform3D Xform` (its basis
+  carries footprint/height as non-uniform scale), `Color Tint` (→ MultiMesh `COLOR`), `Color Custom`
+  (→ `INSTANCE_CUSTOM`, reusing the existing building shader's variation/grid/accent channels
+  **verbatim**), `Flags`, `SubSeed`. *(If `Array<PlacedObject>` load cost bites at full density, swap to
+  parallel typed arrays behind the same loader API.)*
+- **`WorldGenerator`** — one **pure-C#** `Build(seed, extent)` producing a `WorldData`. Deterministic:
+  identical seed → byte-identical bake. (Carries forward the determinism discipline from the old city
+  gen — see [§7.7](#77-determinism).)
+- **Bake runners** — a `WorldBakeTool : EditorScript` (`[Tool]`) that calls `ResourceSaver.Save(...,
+  Compress)`, **and** a headless `run.sh bake` path (saving *data* needs no GPU → CI-safe).
+- **File location** — `res://world/world_8km.res` (tracked authored content, shipped in the PCK).
+  Player-generated worlds would later go to `user://`; the loader takes a path either way.
 
-### 7.2 Procedural generation
-Each `CityChunk` is parametrized by **(seed, difficulty tier)** so generation is deterministic (essential for a future daily seed and for reproducible bugs). Within a chunk: place buildings and obstacles on a grid or along the corridor walls. Generate on a background thread or amortize across frames — **never block the main thread** with a heavy per-frame generation spike. Start simple (boxes), make it *interesting* later — a generator that avoids repetition is the hardest, highest-risk part of the project, so prototype it early.
+### 7.2 Runtime world load + tile-grid rendering
+- **`WorldLoader`** — `ResourceLoader.Load<WorldData>(...)`, builds terrain, **buckets `Objects` into a
+  fixed world-tile grid once** (≈250 m tiles, ≈32×32), and lazily gives near tiles colliders.
+- **WorldTile** — the direct re-bind of the old `CityChunk`: "a square of the **fixed** world populated
+  from `WorldData`" instead of "a corridor slice from live RNG." Holds its terrain mesh, one
+  **`MultiMeshInstance3D` per `ObjectType`** (reusing `CityChunk`'s batched-upload + shader machinery),
+  and lazy colliders. **Tiles never rebuild or recycle** (the world is static) — a big simplification
+  over the old streaming ring.
+- **`MeshRegistry`** — `ObjectType → Mesh/PackedScene`. The **glTF swap seam**: change one entry from a
+  procedural `BoxMesh` to an imported `.glb` and the whole type re-skins, no re-bake.
+- **Culling/LOD** — per-`GeometryInstance3D` `VisibilityRangeBegin/End` (fade mode `Self`); **fog hides
+  the cull boundary** exactly as it hid the old chunk draw distance. All tile MultiMeshes stay resident
+  (cheap, frustum-culled); **colliders instantiate only within a small physics radius** around the car.
 
-### 7.3 Rendering buildings cheaply — **MultiMesh**
-A megacity = thousands of repeated elements. Render repeated building/prop meshes with **`MultiMeshInstance3D` (GPU instancing)** so thousands of objects cost a handful of draw calls instead of thousands. Add **LOD** so distant towers render as cheap boxes. This single technique is the difference between "runs great" and "slideshow," especially on Android.
+### 7.3 Terrain, ocean, biomes
+- **Terrain mesh** — a grid of tiles, each a `MeshInstance3D` whose `ArrayMesh` (via `SurfaceTool`) is
+  displaced from the heightmap slice, with per-vertex `COLOR` from the biome map and one dusk material;
+  per-tile visibility-range LOD.
+- **Heightmap generation** — layered FBM noise + analytic masks: a radial edge-lift (mountain ring), a
+  coastline curve, a signed-distance-carved bay, island bumps, and a flattened city-plateau polygon.
+- **Collision** — **per-tile trimesh static colliders near the car first** (`Mesh.CreateTrimeshShape()`);
+  a single Jolt-scaled `HeightMapShape3D` is a later optimization.
+- **Water** — a new `shaders/water.gdshader` on an ≈8 km plane at Y=0 (dusk ripple + fresnel + SSR),
+  `[fx]`-gated, **visual-only for now**.
 
-### 7.4 Player controller (arcade, not simulation)
-Use an **arcade controller**, not realistic rigid-body flight:
-- Constant forward velocity that **ramps up** over the run; boost adds a temporary multiplier.
-- Player input drives **lateral (X)** and **vertical (Y)** movement, clamped to the corridor bounds, with smoothing/lerp for a weighty-but-responsive feel.
-- Movement via `CharacterBody3D` or direct transform; use **Jolt for collision detection** (crash) rather than letting physics push the ship around.
+### 7.4 The flying car — `RigidBody3D`, assisted-arcade, 6-DOF
+- **Body** — `RigidBody3D` + box `CollisionShape3D`; `GravityScale = 0` (hover via altitude assist);
+  `ContactMonitor = true`, `MaxContactsReported ≈ 8`; tuned linear/angular damping; Jolt.
+- **Control** (forces; every gain `[Export]`ed for live tuning):
+  - **Thrust** along `-Basis.Z` via `ApplyCentralForce` (keeps the old throttle + inertia *intent*).
+  - **Pitch / yaw / roll torques** via `ApplyTorque`.
+  - **PD auto-leveling** (`-kP·error − kD·angularVelocity`) — the "assisted" feel; the car self-rights
+    when you release the stick.
+  - **Coordinated banked turns** — yaw input adds proportional roll so turns feel like flying.
+  - **Speed clamp** on `LinearVelocity`; **hover / altitude assist** to hold height without input.
+- **Bounce** — let Jolt resolve impacts (no clamp/teleport); tune the `PhysicsMaterial` bounce; the
+  control forces re-stabilize after a hit (tumble-then-recover).
+- **Damage** — override `_IntegrateForces(PhysicsDirectBodyState3D state)`, sum
+  `state.GetContactImpulse(i).Length()` above a threshold, forward to the damage component;
+  `GetContactColliderObject(i)` distinguishes terrain / building / traffic.
+- **Borders** — a soft restoring force past `±WorldExtent/2` (no hard clamp, no death).
+- **Preserved API** — `GetSpeed()`, `GetSpeedRatio()`, `GetVerticalSpeed()` stay, so `CameraRig`, the
+  HUD, and audio are untouched. **Removed** — corridor clamp, `IntersectShape` crash/near-miss,
+  `MoveAndSlide`, climb-angle, `Crashed`/`NearMiss` signals.
 
-### 7.5 Near-miss detection
-Wrap the ship in an **`Area3D` slightly larger than its collision shape.** When that area overlaps an obstacle but the (smaller) collision body does **not** → register a **near-miss**: award points, add to the boost meter, bump the combo multiplier, and fire juice (time-dilation flash, whoosh, popup). This mechanic *is* the risk/reward core.
+### 7.5 Damage system — `DamageComponent`
+A signal-driven child of the car: `MaxHealth`, `ImpulseToDamage`, `MinImpulseThreshold`, optional
+`RepairRate`; `ApplyImpact(impulse)`; emits `HealthChanged` / `Damaged` → HUD condition bar.
+**Health at zero does nothing** — no death, no reload. (Consequences are deferred, deeper gameplay.)
+Unsubscribe from any autoload signals in `_ExitTree` (the C# rule).
 
-### 7.6 Scoring & combo
-`ScoreManager` (autoload): `score = distance + Σ(near_miss_value × multiplier)`. Multiplier rises per chained near-miss, **resets or rapidly decays on a crash or after N seconds without a near-miss.** Persist the high score locally (`user://`).
+### 7.6 Aesthetic — synthwave dusk
+Reuse the existing `WorldEnvironment` stack (glow/bloom, exponential + volumetric fog, SSR, ACES
+tonemap) and the procedural sky shader, **retuned from neon-night to a warm golden-purple sunset** so
+the desert, water, and coastline read while neon still pops. All effects stay `[fx]`-gated. The
+existing `building.gdshader` lays its windows out in **world space**, so it renders correctly for
+fixed-grid placement with **no shader change**.
 
-### 7.7 Aesthetic stack (the neon look)
-Drive the mood through a `WorldEnvironment` node:
-- **Glow/bloom** on → neon bloom.
-- **Volumetric fog** → mood, depth, *and* it conveniently hides the chunk draw distance. Dark fog/sky color with a city-glow tint.
-- **Screen-space reflections** (Forward+/desktop only; 4.6 rewrote SSR for cleaner results) → wet-street neon reflections.
-- **Emissive `StandardMaterial3D`** on buildings (neon strips/signage) — emissive sells the look far more cheaply than realistic PBR.
-- Dark sky, distant city glow on the horizon.
+### 7.7 Determinism
+The bake must be reproducible: identical `(seed, extent)` → byte-identical `world_8km.res`. Keep
+seeded-RNG call order/count stable; the seed-mix uses `long` + `unchecked` (C# `int` overflows
+differently from GDScript); match half-away-from-zero rounding where it feeds loop counts (C#
+`Math.Round` is banker's). This matters once for the bake, not per-frame.
 
-### 7.8 Speed feel
-- `Camera3D` **FOV lerps up with current speed** (the single most effective "fast" trick).
-- **Motion blur** (desktop).
-- **Speed-line** particles or a fullscreen shader on a `CanvasLayer`.
-- **Screen shake** (camera noise offset) on boost and near-miss; brief **chromatic aberration** pulse on boost (desktop).
-
-### 7.9 Input (abstract it!)
-Define **`InputMap` actions** (`steer_left/right/up/down`, `boost`) and feed them from platform-specific sources so all game code reads actions, never raw devices:
-- **Desktop:** keyboard (WASD/arrows + Shift to boost) and/or gamepad.
-- **Android:** virtual on-screen joystick + boost button, **or** accelerometer tilt steering + boost button. Decide via playtest (see [Open Decisions](#11-open-decisions)). Because input is abstracted, swapping schemes touches one layer.
-
-### 7.10 Mobile performance budget
-- Keep draw calls low (MultiMesh everywhere repeated).
-- Lean on fog to shrink draw distance.
-- Few/no realtime dynamic lights — rely on emissive materials + baking.
-- Fewer particles than desktop; lighter/no SSR; lighter post-fx.
-- **Export to Android and test on a real mid-range device by Milestone 3** — don't let mobile perf be an end-of-project surprise. Emulators lie; use hardware.
+### 7.8 Input (abstract it!)
+All gameplay reads **`InputMap` actions**, never raw keys. The flight set extends to 6-DOF —
+pitch/yaw via the primary steer actions, plus **roll** (and any strafe/vertical assists) as new
+actions. Camera free-look stays on the mouse. (Touch input is an Android-stage concern.)
 
 ---
 
-## 8. Suggested Project Structure
+## 8. Migration — reuse / rewrite / delete
 
-```
-res://
-├── project.godot
-├── CLAUDE.md                     # LEAN: versions, run/export cmds, style, layout, → docs/
-├── .gitignore                    # .godot/, builds/, rust/target/
-├── docs/
-│   └── GAME_SPEC.md              # this file
-├── scenes/
-│   ├── main/Main.tscn            # root: spawns world + player + UI
-│   ├── player/Ship.tscn
-│   ├── world/CityChunk.tscn
-│   ├── world/ChunkManager.tscn
-│   └── ui/{HUD,GameOver,MainMenu}.tscn
-├── scripts/                      # C# — file name == class name
-│   ├── Ship.cs
-│   ├── ChunkManager.cs
-│   ├── CityChunk.cs
-│   ├── Traffic.cs
-│   └── Game.cs
-├── autoload/                     # singletons (Project > Project Settings > Autoload)
-│   ├── Config.cs
-│   ├── ScoreManager.cs
-│   └── AudioManager.cs
-├── resources/
-│   ├── materials/                # neon emissive .tres
-│   ├── meshes/                   # building kit pieces
-│   └── environment/              # WorldEnvironment .tres
-├── shaders/                      # speed lines, post-fx
-├── assets/{audio,textures}/
-└── rust/                         # OPTIONAL gdext extension — only if profiling demands
-    ├── Cargo.toml
-    └── src/lib.rs
-```
-
-Keep scenes **small and composable** — it makes AI-assisted edits far more reliable.
+| Action | Files | Why |
+|---|---|---|
+| **Reuse as-is** | `scripts/CameraRig.cs`, `autoload/Config.cs`, `shaders/{building,hazard,beacon,post,speed_lines}.gdshader`, `scenes/main/Main.tscn` | Camera/config/shaders are model-agnostic; the building shader is world-space already. |
+| **Retune** | `Game.cs` environment/sky builders, `shaders/sky.gdshader`, `autoload/AudioManager.cs` (drop score cues), `scripts/ScreenFX.cs` (flash on *impact*, not near-miss) | Night → dusk; juice repurposed from scoring to collisions. |
+| **Rewrite** | `scripts/Ship.cs` (→ `RigidBody3D` 6-DOF + impulse damage), `scripts/Game.cs` (orchestration around `WorldLoader`, no score/corridor), `scripts/Hud.cs` (condition bar, not score/combo), `scripts/Traffic.cs` (fixed roaming population) | Core mechanics change. |
+| **Harvest → delete** | `scripts/CityChunk.cs` (its MultiMesh/shader/mesh factories migrate to `TileBuilder`/`MeshRegistry`/`WorldGenerator`) | The geometry knowledge is gold; the corridor framing is not. |
+| **Delete** | `scripts/ChunkManager.cs`, `scripts/GameOver.cs`, `autoload/ScoreManager.cs` (+ its `project.godot` autoload entry), `scenes/world/ChunkManager.tscn`, `scenes/ui/GameOver.tscn` | Streaming, game-over, and scoring are gone. |
+| **Create** | `scripts/world/{WorldData,PlacedObject,WorldGenerator,WorldLoader,TileBuilder,MeshRegistry,WorldBakeTool}.cs`, `scripts/DamageComponent.cs`, `shaders/water.gdshader`, `res://world/world_8km.res` | The new pipeline. |
+| **Edit** | `settings/settings.cfg` (new `[world]`/`[flight]`/`[damage]`; drop `[corridor]`/`[streaming]`/score keys), `project.godot` (drop ScoreManager autoload), `run.sh` (add `bake`) | New sections/commands. |
+| **Keep** | `docs/MIGRATION_GDSCRIPT_TO_CSHARP.md` | Still the valid C# conventions rulebook. |
 
 ---
 
 ## 9. Development Roadmap
 
-Ordered **by risk**: prove the fun before building content, prove it's a game before making it pretty, and validate Android before it's too late to fix. Implement one milestone at a time and **playtest between each.**
+Ordered by **risk and dependency**: rewrite the docs, strip the old loops, **re-prove the flight feel
+in a void**, then build the bake → load → terrain → polish stack. Implement **one task per session**
+and **playtest between each**. Verify each with `./run.sh build && ./run.sh check`, then `./run.sh play`
+(GPU visuals must be eyeballed — headless can't render shaders).
 
-### M0 — Project skeleton
-- [x] Create Godot 4.6 project; init Git + `.gitignore`.
-- [x] `Main.tscn` with a ship that moves forward through empty space + a follow `Camera3D`.
-- [x] Wire `InputMap` actions + keyboard steering.
-- [x] **Goal:** something moves and the camera follows.
+### Task 0 — Reframe the design docs
+- [x] Rewrite `docs/GAME_SPEC.md` to the open-world design (this document).
+- [x] Update `CLAUDE.md` (stack, architecture rules, layout, workflow).
+- [ ] *(settings.cfg restructure folded into Task 1, so config keys and the code reading them change together.)*
+- **Goal:** the north-star docs describe the new game; the project still builds.
 
-### M1 — Flight feel *(the make-or-break milestone)*
-- [x] Tune forward speed, steering response, smoothing, corridor clamps.
-- [x] Boost burst + speed ramp.
-- [x] FOV-on-speed and basic screen shake. *(Speed lines deferred — fold into M4 juice pass.)*
-- [x] **Goal:** flying feels *great* in an empty void. *(Playtested & approved 2026-05-30.)*
+### Task 1 — Scaffolding & removals
+- [ ] Delete `autoload/ScoreManager.cs` (+ its `project.godot` autoload line), `scripts/GameOver.cs`, `scripts/ChunkManager.cs`, and the two dead `.tscn`s.
+- [ ] Scrub score / near-miss / combo / crash→game-over / corridor-clamp / streaming from `Game.cs`, `Hud.cs`, `Ship.cs`.
+- [ ] Restructure `settings/settings.cfg` (new `[world]`/`[flight]`/`[damage]`; drop `[corridor]`/`[streaming]`/score keys; keep `[display]`/`[camera]`/`[audio]`/`[fx]`). *Re-read it immediately before editing, preserve carried-over tuned values, stage it explicitly.*
+- [ ] `Game.cs` spawns car + camera + environment + a flat ground void (the car stays `CharacterBody3D` **for this task only**).
+- **Goal:** boots clean, fly the void with a speed HUD, **no game-over possible**.
 
-### M2 — Procedural corridor
-- [x] `CityChunk.tscn` with buildings via `MultiMeshInstance3D`.
-- [x] `ChunkManager`: spawn-ahead / recycle-behind with an object pool.
-- [x] Seed + difficulty parametrization; threaded/amortized generation.
-- [x] **Goal:** an endless city to fly through, no hitches.
+### Task 2 — Flight: `RigidBody3D` 6-DOF + damage *(the make-or-break feel gate)*
+- [ ] Rewrite `Ship.cs` to the assisted-arcade `RigidBody3D` 6-DOF controller.
+- [ ] Add `scripts/DamageComponent.cs`; wire `_IntegrateForces` → contact impulse → damage.
+- [ ] HUD condition bar; add roll/yaw input actions; drop test boxes to hit.
+- **Goal:** 6-DOF self-stabilizing flight feels **great**; ramming a box bounces realistically + drops condition + **never ends the game**; releasing the stick re-levels. *Do not proceed until this feels right (the M1 gate).*
 
-### M3 — Game loop
-- [x] Obstacles + Jolt collision → game-over state.
-- [x] Near-miss detection → points + boost + combo. *(Implemented via per-frame `direct_space_state` shape queries, not an `Area3D`: under Godot 4.6 + Jolt, an `Area3D` child of a `move_and_slide()`-driven `CharacterBody3D` did not report overlaps; the shape query is deterministic and matches the spec's "detect, don't push" intent.)*
-- [x] `ScoreManager` (distance + near-miss × multiplier, decay on hit); local high score.
-- [x] `HUD` (score, multiplier, boost) + `GameOver` with **instant restart**.
-- [ ] ~~First Android export + on-device perf check.~~ **Postponed to a mature dev stage (per project decision, 2026-05-30).**
-- [x] **Goal:** it's a real game with a score, a fail state, and the "one more go" loop. *(Desktop; headless-verified, pending playtest.)*
+### Task 3 — World data + bake pipeline *(riskiest; pure data, no rendering)*
+- [ ] Add `WorldData` / `PlacedObject` / `ObjectType`, `WorldGenerator` (heightmap + coastline/bay/island/mountain masks + biome map + deterministic object placement on the city plateau).
+- [ ] Add `WorldBakeTool` (EditorScript) + a `run.sh bake` headless path + a headless validator.
+- **Goal:** the bake writes `res://world/world_8km.res`; **same seed → identical bytes**; the validator prints sane counts.
 
-### M4 — Aesthetic pass
-- [x] `WorldEnvironment`: glow, volumetric fog, dark sky; SSR on desktop. *(Procedural neon sky + horizon glow, ACES tonemap, additive multi-mip glow, exponential + volumetric fog, SSR mirrored in a wet-street ground; all gated by `settings.cfg [fx]`.)*
-- [x] Emissive neon building materials; obstacle telegraphing. *(World-space procedural neon-window building shader; a shared pulsing + fresnel-rim hazard shader for the amber obstacles & magenta traffic.)*
-- [x] One music track + core SFX; deepen juice (near-miss flash/time-dilation, haptics). *(All audio synthesised procedurally — a looping synth bed + near-miss/boost/crash SFX via the `AudioManager` autoload; plus screen flash, bounded time-dilation, boost punch, fullscreen speed lines, chromatic aberration. Haptics deferred to M5/Android.)*
-- [ ] **Goal:** it's *beautiful* and it *feels* fast. *(Implemented headless-clean; pending playtest.)*
+### Task 4 — Runtime world load + tile-grid rendering *(joins Tasks 2 + 3)*
+- [ ] Add `WorldLoader`, `TileBuilder`, `MeshRegistry` (harvest `CityChunk`'s MultiMesh uploads + the unchanged building shader); lazy near-tile colliders; visibility-range LOD; `Game.cs` spawns the loader.
+- **Goal:** the full baked 8 km city renders as MultiMesh batches, **identical every launch**, buildings solid (bounce + damage), far tiles cull into fog, FPS holds.
 
-### M5 — Android ship
-- [ ] Mobile renderer export preset; touch input scheme.
-- [ ] Mobile perf tuning to hit framerate target on a mid-range device.
-- [ ] **Goal:** MVP playable and smooth on Linux **and** Android. ✅ MVP complete.
+### Task 5 — Terrain + ocean + biomes
+- [ ] Per-tile terrain mesh from the heightmap with biome vertex colours; near-tile trimesh colliders; `shaders/water.gdshader` + ocean plane at Y=0.
+- **Goal:** reads as a coastal city on an ocean with a bay + islands ringed by desert/hills; land on terrain, skim the water, thread the canyons; terrain solid.
 
-### Post-MVP backlog
-Daily seed → leaderboards/ghosts → meta-progression & unlocks → multiple ships → audio-reactive world → additional districts → monetization. (Prioritize against [Open Decisions](#11-open-decisions).)
+### Task 6 — Synthwave dusk aesthetic pass
+- [ ] Retune the `WorldEnvironment` + sky from neon-night to warm dusk/sunset; confirm neon still glows; retune `[fx]`.
+- **Goal:** warm synthwave dusk; neon reads; desert + ocean warm and legible; FPS holds.
+
+### Task 7 — Ambient AI traffic
+- [ ] Strip `Traffic.cs`'s recycle-window; a fixed population roams baked spawn points within the borders, collidable.
+- **Goal:** sparse cars roam in-bounds; bumping one = damage + bounce.
+
+### Task 8 — glTF model-loading seam
+- [ ] Swap one or two placeholder meshes for an imported `.glb` via `MeshRegistry` — **same `world_8km.res`, zero re-bake**.
+- **Goal:** a type renders from glTF purely by a registry change; transforms line up; the bake is untouched.
+
+### Backlog (post-foundation)
+Objectives/missions → economy → traffic AI behaviour → day/night & weather → real art (buildings,
+the player car) → interiors → audio design → Android. Prioritize against [Open Decisions](#11-open-decisions).
 
 ---
 
 ## 10. Working with Claude Code
 
-- **Put this file at `docs/GAME_SPEC.md`** and keep a **lean `CLAUDE.md`** at the repo root. `CLAUDE.md` is auto-loaded into context at the start of every Claude Code session, so keep it short and specific — it's for things needed *every* session, not the full design (that lives here and gets referenced).
-- A good `CLAUDE.md` for this project contains: Godot version (4.6), how to run/export (commands), C# style conventions, the project layout, a few "always do X" rules, and a pointer like `See @docs/GAME_SPEC.md for full design and the milestone roadmap.`
-- You can run **`/init`** to scaffold a `CLAUDE.md`, then trim it down.
-- **Work milestone by milestone.** Ask Claude Code to implement one milestone (or sub-task) at a time, then playtest before moving on. Use **`/clear`** between unrelated tasks to keep context clean.
-- **Track progress with the checkboxes** in this doc (or a separate `TASKS.md`) — Claude Code can tick them off as work completes.
-- **Commit after each working increment.** Small, verifiable steps beat big leaps for AI-assisted work.
+- **Put this file at `docs/GAME_SPEC.md`** and keep a **lean `CLAUDE.md`** at the repo root (auto-loaded
+  every session — short and specific; the full design lives here and gets referenced).
+- **Work one task at a time** (Roadmap §9), then **playtest** before moving on. Use **`/clear`** between
+  unrelated tasks.
+- **Track progress with the checkboxes** above — tick them as work completes.
+- **Commit after each working increment.**
 
-**Suggested first prompt to Claude Code:**
-> "Read `docs/GAME_SPEC.md`. Set up the Godot 4.6 project skeleton and implement Milestone M0. Then stop so I can playtest."
+**Suggested next prompt:**
+> "Read `docs/GAME_SPEC.md`. Implement Task 1 (scaffolding & removals). Then stop so I can playtest."
 
 ---
 
 ## 11. Open Decisions
 
-Things **you** should decide (some via playtest):
+- [ ] **Flight control mapping** — which axes map to WASD vs. roll/yaw, and how "assisted" vs. "free" (settle by playtest in Task 2).
+- [ ] **Object density gradient** — uniform city, or dense core fading to sparse outskirts?
+- [ ] **Water as gameplay** — visual-only now; later add soft drag/damage in the bay, or keep it scenery?
+- [ ] **Damage consequences** — what (if anything) happens as condition drops (handling loss, forced landing, repair stations)?
+- [ ] **The deeper game** — objectives, economy, missions, factions: the whole "what do you *do*" layer, intentionally deferred.
+- [ ] **Real art** — when to source glTF building/car models (the seam lands in Task 8).
+- [ ] **Android** — still a target eventually, or desktop-first indefinitely?
 - [ ] **Final title.**
-- [ ] **Art direction:** color palette (classic magenta/cyan? synthwave sunset? Tron-grid mono?) and mood (rainy *Blade Runner* noir vs. clean neon vs. glitchy). Pin this early — it drives all materials/lighting.
-- [ ] **Android input scheme:** virtual joystick vs. tilt steering. Prototype both in M5, decide by feel.
-- [ ] **Commercial model:** premium one-time purchase, free + cosmetic unlocks, or ad-supported on mobile? (Godot adds no constraints here, but the choice shapes the meta-progression design.)
-- [ ] **Signature feature commitment:** is the **audio-reactive world** the identity of the game (high effort, high differentiation), or a nice-to-have? Decide after the core is fun.
-- [ ] **Rust or not:** defer entirely until a profiler proves C# is the bottleneck for procedural generation.
 
 ---
 
 ## 12. Reference — Target Versions
 
-- **Godot 4.6** (stable, Jan 2026). Renderers: Forward+ (desktop) / Mobile (Android). Jolt is the default 3D physics engine.
-- **godot-rust / gdext v0.5** (2026) — optional native acceleration; GDExtension API backward-compatible since Godot 4.1. Note: Rust-on-Android via gdext is still experimental — keep any Rust extension desktop-first.
-- **Export targets:** Linux + Android (MVP).
+- **Godot 4.6** (stable, Jan 2026). Renderer: Forward+ (desktop). Jolt is the default 3D physics engine.
+- **glTF 2.0 (`.glb`)** for object models (loaded via the `MeshRegistry` seam, later).
+- **godot-rust / gdext** — optional native acceleration; only if profiling demands.
+- **Export target:** Linux (desktop) for the foundation.
 
-*Verify exact versions/features against current Godot docs when you start, since point releases move.*
+*Verify exact versions/features against current Godot docs when you start — point releases move.*
