@@ -21,6 +21,7 @@ public partial class Game : Node3D
 	private Ship _ship;
 	private CameraRig _rig;
 	private ScreenFX _fx;
+	private RainFX _rain;
 	private Hud _hud;
 	private WorldLoader _world;
 
@@ -37,6 +38,7 @@ public partial class Game : Node3D
 		SpawnOcean();
 		SpawnUi();
 		SpawnScreenFx();
+		SpawnRain();
 		AudioManager.Instance?.StartMusic();
 	}
 
@@ -157,6 +159,22 @@ public partial class Game : Node3D
 		AddChild(_fx);
 	}
 
+	// Spawns the fullscreen lens-rain overlay (Task 6, user-requested cyberpunk scope extension). A NEW screen
+	// layer (RainFX, layer 31) — does NOT touch ScreenFX/post. [fx] rain defaults ON so it renders out of the
+	// box; rain_strength scales the streak alpha. Fed the ship's speed via SpeedChanged so the streaks shear
+	// back / intensify with velocity. Toggles are set BEFORE AddChild so _Ready builds the right pass.
+	private void SpawnRain()
+	{
+		if (GetNodeOrNull("RainFX") != null)
+			return;
+		if (!CfgBool("fx", "rain", true))
+			return;
+		_rain = new RainFX { Name = "RainFX" };
+		_rain.Enabled = true;
+		_rain.Strength = CfgFloat("fx", "rain_strength", 1.0f);
+		AddChild(_rain);
+	}
+
 	// Forwards the ship's per-frame speed to the screen-FX layer (speed lines + aberration ramp), and
 	// punches the camera + plays the thruster whoosh the instant you start throttling up (rising edge).
 	private void OnShipSpeedChanged(float speed, float ratio, bool accelerating)
@@ -166,6 +184,7 @@ public partial class Game : Node3D
 			_fx.SetSpeedRatio(ratio);
 			_fx.SetBoost(accelerating);
 		}
+		_rain?.SetSpeedRatio(ratio);   // streaks shear back + intensify with speed
 		if (accelerating && !_wasBoosting)
 		{
 			if (_rig != null)
