@@ -99,14 +99,30 @@ public static class TerrainBuilder
         };
     }
 
-    // A static trimesh collider from the SAME terrain mesh. DEFAULT physics layer (1, "ship") — like the
-    // building boxes — so the car (mask 1) bounces and the existing impulse->damage path fires with NO Ship
-    // change. Added to the "terrain" group for future contact attribution. Built lazily, near the car only.
-    public static StaticBody3D BuildTerrainCollider(Mesh terrainMesh, PhysicsMaterial mat)
+    // A static SOLID heightfield collider, sampled from the SAME global height field the visual mesh uses
+    // (WorldData.HeightAt) so it lines up exactly. A HeightMapShape3D is un-tunnellable from EITHER side —
+    // unlike the old zero-thickness CreateTrimeshShape() trimesh, which a fast dive stepped past between
+    // physics ticks (Jolt CCD is weak vs concave), so the car fell THROUGH the ground (Task 10). DEFAULT
+    // physics layer (1, "ship") — like the building boxes — so the car (mask 1) bounces and the existing
+    // impulse->damage path fires with NO Ship change. "terrain" group kept for contact attribution. Built
+    // lazily, near the car only. The mesh (rendering) is unchanged — only the COLLIDER swapped.
+    public static StaticBody3D BuildTerrainCollider(WorldData data, Vector3 center, float tileSize, int quads, PhysicsMaterial mat)
     {
+        // K x K real-elevation samples on the SAME grid as the mesh (K = quads+1, so 9 at quads=8).
+        int K = quads + 1;
+        float step = tileSize / quads, half = tileSize * 0.5f;
+        var hts = new float[K * K];
+        for (int j = 0; j < K; j++)               // j = depth (Z), i = width (X) -> matches MapData[d*W + w]
+        for (int i = 0; i < K; i++)
+            hts[j * K + i] = data.HeightAt(center.X - half + i * step, center.Z - half + j * step) / step;
+        // Uniform scale (X/Z spacing = step, Y back to real metres): GodotPhysics3D rejects non-uniform scale,
+        // so pre-divide the heights by step and scale all three axes by step (the documented heightfield recipe).
+        var hm = new HeightMapShape3D { MapWidth = K, MapDepth = K, MapData = hts };
+        var col = new CollisionShape3D { Shape = hm, Scale = new Vector3(step, step, step) };
+
         var body = new StaticBody3D { Name = "TerrainCol", PhysicsMaterialOverride = mat };
         body.AddToGroup("terrain");
-        body.AddChild(new CollisionShape3D { Shape = terrainMesh.CreateTrimeshShape() });
+        body.AddChild(col);
         return body;
     }
 }

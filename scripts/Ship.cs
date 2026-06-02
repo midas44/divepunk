@@ -34,12 +34,18 @@ public partial class Ship : RigidBody3D
 	[Export] public float Bounce = 0.3f;          // PhysicsMaterial bounce on impact (0 = dead, 1 = super-ball)
 	[Export] public float Friction = 0.4f;
 
+	[ExportGroup("Assist (hover / landing)")]
+	[Export] public float HoverHeight = 12.0f;    // assist band (m): a downward ray within this distance of the surface below cushions the descent
+	[Export] public float HoverStrength = 0.0f;   // optional upward ground-spring (N). 0 by default — under GravityScale=0 a static spring REPELS (no stable hover); raise only for a deliberate float feel
+	[Export] public float HoverDamp = 40.0f;      // up-force per m/s of DESCENT (the workhorse): cushions a soft landing AND arrests a fast drop so you can't slam down / tunnel
+
 	// Preserved: drives camera FOV, speed-line FX, audio. Emitted every physics frame. ratio is 0..1 of
 	// MaxSpeed; `accelerating` = throttling up (drives the speed-up juice / shake / whoosh).
 	[Signal] public delegate void SpeedChangedEventHandler(float speed, float ratio, bool accelerating);
 
 	private Node3D _model;
 	private DamageComponent _damage;
+	private bool _recoverRequested;   // set by the recover key in _PhysicsProcess, applied in _IntegrateForces
 
 	public override void _Ready()
 	{
@@ -113,13 +119,59 @@ public partial class Ship : RigidBody3D
 			}
 		}
 
+		// Recover / flip-upright (press G): queue an authoritative reset, applied in _IntegrateForces.
+		if (Input.IsActionJustPressed("recover"))
+			_recoverRequested = true;
+
+		// Near-ground hover / landing assist — a downward ray finds the surface (terrain OR rooftop); within
+		// the band it pushes up, so you settle and land cleanly and can't slam down hard enough to tunnel.
+		HoverAssist();
+
 		float spd = LinearVelocity.Length();
 		EmitSignal(SignalName.SpeedChanged, spd, GetSpeedRatio(), thrustIn > 0.01f);
+	}
+
+	// Near-ground assist: cast straight down; within HoverHeight of the surface, add an up-force. The DESCENT
+	// term (HoverDamp × drop-speed) is the workhorse — it cushions a gentle landing and arrests a fast dive so
+	// you settle onto the solid ground without slamming / tunnelling, then REST (zero force at zero descent, so
+	// the car sits on the ground under GravityScale=0). The optional spring (HoverStrength) adds a float feel
+	// but REPELS under zero-G (no stable equilibrium), so it defaults off. A FORCE -> the engine integrates it
+	// -> framerate-independent (no ×delta). Never a hard altitude lock.
+	private void HoverAssist()
+	{
+		if (HoverHeight <= 0.0f) return;
+		Vector3 from = GlobalPosition;
+		Vector3 to = from + Vector3.Down * (HoverHeight + 2.0f);
+		var q = PhysicsRayQueryParameters3D.Create(from, to, 1, new Godot.Collections.Array<Rid> { GetRid() });
+		Godot.Collections.Dictionary hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
+		if (hit.Count == 0) return;
+
+		float dist = from.Y - ((Vector3)hit["position"]).Y;          // height above the surface
+		float t = Mathf.Clamp(1.0f - dist / HoverHeight, 0.0f, 1.0f); // 0 at the band edge -> 1 at the surface
+		float up = HoverStrength * t;                                // soft spring (yields to deliberate descent)
+		float descent = -LinearVelocity.Y;                           // > 0 when dropping
+		if (descent > 0.0f) up += HoverDamp * descent * t;           // arrest fast drops; ~0 for gentle landings
+		ApplyCentralForce(Vector3.Up * up);
 	}
 
 	// DAMAGE + speed clamp — runs in the physics solver callback, where contact impulses are valid.
 	public override void _IntegrateForces(PhysicsDirectBodyState3D state)
 	{
+		// Recover / flip-upright: forcibly right the body here (the authoritative solver callback). Flatten
+		// pitch+roll but KEEP heading, zero the spin, damp + nudge up to lift clear of whatever it's wedged on.
+		if (_recoverRequested)
+		{
+			_recoverRequested = false;
+			Vector3 fwd = -state.Transform.Basis.Z; fwd.Y = 0.0f;            // current nose, flattened
+			fwd = fwd.LengthSquared() > 0.0001f ? fwd.Normalized() : Vector3.Forward;
+			Vector3 newZ = -fwd;                                            // basis Z is the back
+			Vector3 newX = Vector3.Up.Cross(newZ).Normalized();            // right
+			Vector3 newY = newZ.Cross(newX).Normalized();                  // up
+			state.Transform = new Transform3D(new Basis(newX, newY, newZ), state.Transform.Origin);
+			state.AngularVelocity = Vector3.Zero;
+			state.LinearVelocity = state.LinearVelocity * 0.3f + Vector3.Up * 6.0f;
+		}
+
 		int contacts = state.GetContactCount();
 		float impulse = 0.0f;
 		for (int i = 0; i < contacts; i++)

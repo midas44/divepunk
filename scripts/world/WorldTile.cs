@@ -9,8 +9,11 @@ public partial class WorldTile : Node3D
 {
     private readonly List<PlacedObject> _objects = new();
     private Node3D _colliderRoot;
-    private Mesh _terrainMesh;       // kept for the lazy trimesh collider
+    private Mesh _terrainMesh;       // built for rendering; the collider is a heightfield (below), not this mesh
     private bool _visualsBuilt;
+    private WorldData _data;         // stashed in BuildVisuals so the lazy collider can re-sample the height field
+    private float _tileSize;
+    private int _quads;
 
     public Vector3 Center;           // this tile's world origin (set by the loader before AddChild; Y = 0)
 
@@ -23,6 +26,7 @@ public partial class WorldTile : Node3D
     public void BuildVisuals(WorldData data, float tileSize, int terrainQuads, float terrainViewEnd, float buildingViewEnd, float fadeMargin)
     {
         if (_visualsBuilt) return;
+        _data = data; _tileSize = tileSize; _quads = terrainQuads;   // the heightfield collider re-uses these
         MeshInstance3D terrain = TerrainBuilder.BuildTerrainMesh(data, Center, tileSize, terrainQuads, terrainViewEnd, fadeMargin);
         _terrainMesh = terrain.Mesh;
         AddChild(terrain);
@@ -39,8 +43,8 @@ public partial class WorldTile : Node3D
         if (_colliderRoot != null) return;
         _colliderRoot = new Node3D { Name = "Colliders" };
         AddChild(_colliderRoot);
-        if (_terrainMesh != null)
-            _colliderRoot.AddChild(TerrainBuilder.BuildTerrainCollider(_terrainMesh, mat));
+        if (_data != null)
+            _colliderRoot.AddChild(TerrainBuilder.BuildTerrainCollider(_data, Center, _tileSize, _quads, mat));
         if (_objects.Count > 0)
             foreach (StaticBody3D body in TileBuilder.BuildColliders(_objects, Center, mat))
                 _colliderRoot.AddChild(body);

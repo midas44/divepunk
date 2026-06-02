@@ -267,6 +267,9 @@ public partial class Game : Node3D
 		ship.Bounce           = CfgFloat("flight", "bounce", ship.Bounce);
 		ship.InvertPitch      = CfgBool("flight", "invert_pitch", ship.InvertPitch);
 		ship.InvertRoll       = CfgBool("flight", "invert_roll", ship.InvertRoll);
+		ship.HoverHeight      = CfgFloat("flight", "hover_height", ship.HoverHeight);
+		ship.HoverStrength    = CfgFloat("flight", "hover_strength", ship.HoverStrength);
+		ship.HoverDamp        = CfgFloat("flight", "hover_damp", ship.HoverDamp);
 	}
 
 	// Pushes the config-driven camera tunables onto the rig before it enters the tree, so _Ready()
@@ -428,6 +431,7 @@ public partial class Game : Node3D
 		AddAction("decelerate", new[] { Key.Ctrl, Key.X, Key.C, Key.V });
 		AddAction("roll_left", new[] { Key.Q });           // 6-DOF roll (Task 2)
 		AddAction("roll_right", new[] { Key.E });
+		AddAction("recover", new[] { Key.G });             // Task 10: flip-upright / free a wedged car (G is free)
 		AddAction("cycle_camera", new[] { Key.Tab });      // moved off Q (now roll_left); CameraRig reads the action, not the key
 		AddAction("restart", new[] { Key.R });
 		AddAction("toggle_fullscreen", new[] { Key.F });
