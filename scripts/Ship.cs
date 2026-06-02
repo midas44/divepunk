@@ -28,6 +28,7 @@ public partial class Ship : RigidBody3D
 	[Export] public float BankCoordination = 0.7f;// yaw input adds proportional roll → turns feel like flying
 	[Export] public float LinearDampValue = 0.6f; // glide/coast (set onto RigidBody3D.LinearDamp)
 	[Export] public float AngularDampValue = 3.0f;// rotations settle when you let go (set onto AngularDamp)
+	[Export] public float Grip = 3.0f;            // arcade steering: how fast LinearVelocity follows the nose (1/s); 0 = pure Newtonian (rotating won't steer)
 
 	[ExportGroup("Collision")]
 	[Export] public float Bounce = 0.3f;          // PhysicsMaterial bounce on impact (0 = dead, 1 = super-ball)
@@ -90,6 +91,23 @@ public partial class Ship : RigidBody3D
 		{
 			Vector3 levelAxis = b.Y.Cross(Vector3.Up);
 			ApplyTorque(levelAxis * LevelStrength - AngularVelocity * LevelDamping);
+		}
+
+		// Arcade steering assist: ease the velocity toward where the nose points, so ROTATING the car actually
+		// changes your direction of travel. Without this the RigidBody keeps its Newtonian momentum and turning
+		// doesn't steer (you drift the old way). Framerate-independent; preserves speed. Grip = 0 -> Newtonian.
+		if (Grip > 0.0f)
+		{
+			Vector3 vel = LinearVelocity;
+			float spd0 = vel.Length();
+			if (spd0 > 1.0f)
+			{
+				float k = 1.0f - Mathf.Exp(-Grip * (float)delta);
+				Vector3 blended = vel + (-b.Z * spd0 - vel) * k;   // ease toward the nose (-Z) at the current speed
+				float bl = blended.Length();
+				if (bl > 0.001f)
+					LinearVelocity = blended / bl * spd0;          // renormalise -> speed kept, heading steered
+			}
 		}
 
 		float spd = LinearVelocity.Length();
