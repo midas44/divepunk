@@ -3,7 +3,7 @@ using Godot;
 // Root bootstrap — DIVEPUNK (open-world reframe).
 //
 // Attach to the root Node3D of Main.tscn and press Play. It self-assembles a runnable
-// scene (ship + chase camera + minimal environment + a flat ground void + telemetry HUD)
+// scene (ship + chase camera + minimal environment + the baked world: terrain, ocean, city + telemetry HUD)
 // and registers the input actions in code, so the project runs with zero manual setup.
 //
 // As you build real, hand-authored scenes you can delete the auto-spawn helpers below
@@ -12,6 +12,7 @@ public partial class Game : Node3D
 {
 	private static readonly PackedScene HudScene = GD.Load<PackedScene>("res://scenes/ui/HUD.tscn");
 	private static readonly Shader SkyShader = GD.Load<Shader>("res://shaders/sky.gdshader");   // procedural neon cloud sky (M4 view pass)
+	private static readonly Shader WaterShader = GD.Load<Shader>("res://shaders/water.gdshader"); // dusk ocean plane (Task 5)
 
 	[ExportGroup("Juice")]
 	[Export] public float ShakeOnBoost = 0.35f;            // camera punch the moment a boost kicks in
@@ -21,7 +22,6 @@ public partial class Game : Node3D
 	private CameraRig _rig;
 	private ScreenFX _fx;
 	private Hud _hud;
-	private MeshInstance3D _ground;
 	private WorldLoader _world;
 
 	private bool _wasBoosting = false;
@@ -34,7 +34,7 @@ public partial class Game : Node3D
 		EnsureEnvironment();
 		SpawnShipAndCamera();
 		SpawnWorld();
-		SpawnTestField();
+		SpawnOcean();
 		SpawnUi();
 		SpawnScreenFx();
 		AudioManager.Instance?.StartMusic();
@@ -111,29 +111,26 @@ public partial class Game : Node3D
 			_ship.GlobalPosition = _world.CityCenter + new Vector3(0.0f, 160.0f, 700.0f);
 	}
 
-	// The temporary flat sea-level ground (top face at Y=0) so you can land/bounce before Task 5 adds real
-	// terrain + ocean. The Task-2 neon obstacle boxes are gone — the baked city (SpawnWorld) supersedes them.
-	// Idempotent; the visual RefGround (Game._ground) still follows the ship for the open void beyond the slab.
-	private void SpawnTestField()
+	// A dusk ocean plane at sea level (world Y=0), under shaders/water.gdshader. Visual-only (no collider — you
+	// fly through it). Fixed at the origin (the world is bounded), sized to reach past the view. [fx] water=false
+	// drops it (you'd then see the bare seabed terrain). Tunables fall back to the shader defaults if absent.
+	private void SpawnOcean()
 	{
-		if (GetNodeOrNull("TestField") != null)
-			return;
+		if (GetNodeOrNull("Ocean") != null) return;
+		if (!CfgBool("fx", "water", true)) return;
 
-		var field = new Node3D { Name = "TestField" };
-		AddChild(field);
-
-		var bounceMat = new PhysicsMaterial { Bounce = 0.3f, Friction = 0.5f };
-
-		// Collision floor: a large finite slab with its top face at Y=0, so you can bounce off the ground.
-		// NOTE: WorldBoundaryShape3D is FINITE under Jolt (a ~1000 m slab centred at origin), so the car
-		// would fly off its edge — a big box won't. The visual RefGround (Game._ground) still follows you.
-		var floor = new StaticBody3D { Name = "Floor" };
-		floor.PhysicsMaterialOverride = bounceMat;
-		var floorCol = new CollisionShape3D { Name = "Col" };
-		floorCol.Shape = new BoxShape3D { Size = new Vector3(40000.0f, 10.0f, 40000.0f) };
-		floor.AddChild(floorCol);
-		floor.Position = new Vector3(0.0f, -5.0f, 0.0f);   // top face at Y=0
-		field.AddChild(floor);
+		float extent = CfgFloat("world", "extent", 8000.0f);
+		var ocean = new MeshInstance3D
+		{
+			Name = "Ocean",
+			Mesh = new PlaneMesh { Size = new Vector2(extent * 2.0f, extent * 2.0f) },   // covers the world + horizon margin
+			Position = new Vector3(0.0f, 0.0f, 0.0f),
+		};
+		var mat = new ShaderMaterial { Shader = WaterShader };
+		mat.SetShaderParameter("ripple_speed", CfgFloat("fx", "water_ripple_speed", 0.04f));
+		mat.SetShaderParameter("water_energy", CfgFloat("fx", "water_energy", 1.0f));
+		ocean.MaterialOverride = mat;
+		AddChild(ocean);
 	}
 
 	// Spawns the in-run telemetry HUD (no scoring / game-over in the reframe).
@@ -188,16 +185,6 @@ public partial class Game : Node3D
 		_fx?.Flash(Mathf.Clamp(amount * 0.02f, 0.0f, 0.6f), new Color(1.0f, 0.4f, 0.3f));
 	}
 
-	public override void _Process(double delta)
-	{
-		// Keep the reference ground centred under the ship (open world: follow on both X and Z).
-		if (_ship != null && _ground != null)
-		{
-			Vector3 gp = _ship.GlobalPosition;
-			_ground.GlobalPosition = new Vector3(gp.X, 0.0f, gp.Z);
-		}
-	}
-
 	// Safe read from the Config autoload (falls back to the default if it isn't present).
 	private float CfgFloat(string section, string key, float fallback) => Config.Instance != null ? Config.Instance.GetFloat(section, key, fallback) : fallback;
 	private int CfgInt(string section, string key, int fallback) => Config.Instance != null ? Config.Instance.GetInt(section, key, fallback) : fallback;
@@ -221,6 +208,7 @@ public partial class Game : Node3D
 		ship.BankCoordination = CfgFloat("flight", "bank_coordination", ship.BankCoordination);
 		ship.LinearDampValue  = CfgFloat("flight", "linear_damp", ship.LinearDampValue);
 		ship.AngularDampValue = CfgFloat("flight", "angular_damp", ship.AngularDampValue);
+		ship.Grip             = CfgFloat("flight", "grip", ship.Grip);
 		ship.Bounce           = CfgFloat("flight", "bounce", ship.Bounce);
 		ship.InvertPitch      = CfgBool("flight", "invert_pitch", ship.InvertPitch);
 		ship.InvertRoll       = CfgBool("flight", "invert_roll", ship.InvertRoll);
@@ -261,28 +249,6 @@ public partial class Game : Node3D
 			we.Environment = BuildEnvironment();
 			AddChild(we);
 		}
-
-		if (GetNodeOrNull("RefGround") == null)
-		{
-			// A near-black WET street plane: low roughness + a little metal so SSR mirrors the neon
-			// skyline in it (spec §7.7, wet-street reflections). Reads as dark glass when SSR is off.
-			// Stored as _ground and re-centred under the ship each frame (see _Process) so the open
-			// void always has a floor beneath you wherever you fly.
-			var ground = new MeshInstance3D();
-			ground.Name = "RefGround";
-			var plane = new PlaneMesh();
-			plane.Size = new Vector2(20000.0f, 20000.0f);
-			ground.Mesh = plane;
-			var gm = new StandardMaterial3D();
-			gm.AlbedoColor = new Color(0.012f, 0.016f, 0.03f);
-			gm.Metallic = 0.35f;
-			gm.MetallicSpecular = 0.6f;
-			gm.Roughness = 0.22f;
-			ground.MaterialOverride = gm;
-			ground.Position = new Vector3(0.0f, 0.0f, 0.0f);
-			AddChild(ground);
-		}
-		_ground = GetNodeOrNull<MeshInstance3D>("RefGround");
 	}
 
 	// Assembles the neon-night Environment (M4 aesthetic pass, spec §7.7). The heavier desktop
@@ -347,7 +313,7 @@ public partial class Game : Node3D
 		// the scene depth but not the sky itself.
 		env.VolumetricFogSkyAffect = CfgFloat("fx", "volumetric_fog_sky_affect", 0.0f);
 
-		// Screen-space reflections — wet-street neon (Forward+ desktop); reflects in the RefGround.
+		// Screen-space reflections — neon on wet surfaces (Forward+ desktop); reflects the skyline in the water + terrain.
 		env.SsrEnabled = CfgBool("fx", "ssr", true);
 		env.SsrMaxSteps = 32;
 		env.SsrFadeIn = 0.15f;

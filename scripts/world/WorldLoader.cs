@@ -15,7 +15,9 @@ public partial class WorldLoader : Node3D
     [ExportGroup("Tiling / LOD")]
     [Export] public float TileSize = 250.0f;          // ~32x32 over the 8 km world
     [Export] public float ViewDistance = 5000.0f;     // per-tile VisibilityRangeEnd (fog hides the boundary)
-    [Export] public float ViewFadeMargin = 600.0f;
+    [Export] public float ViewFadeMargin = 600.0f;     // dither-fade band before the cull end (applies to terrain + buildings)
+    [Export] public float TerrainViewDistance = 12000.0f; // terrain VisibilityRangeEnd: large enough to cover the whole bounded world (diagonal ≈11.3 km) so the distant mountain ring never dither-culls — it sat in the 5 km building fade band and fragmented. Terrain is cheap (~128 tris/tile); fog (Task 6) handles the far haze.
+    [Export] public int TerrainTileQuads = 8;          // terrain mesh resolution per tile (~1 heightmap cell per quad at 250 m)
 
     [ExportGroup("Colliders")]
     [Export] public int ColliderTileRadius = 2;       // tiles around the player kept collidable (±2 = ~500 m lookahead)
@@ -41,11 +43,28 @@ public partial class WorldLoader : Node3D
         _half = _data.WorldExtent * 0.5f;
         _colliderMat = new PhysicsMaterial { Bounce = ColliderBounce, Friction = ColliderFriction };
 
-        BucketObjects();
+        BuildTileGrid();    // full coverage: EVERY grid cell gets a tile (terrain everywhere, not just the city)
+        BucketObjects();    // drop each PlacedObject into its (already-created) tile
         foreach (WorldTile tile in _tiles.Values)
-            tile.BuildVisuals(ViewDistance, ViewFadeMargin);
+            tile.BuildVisuals(_data, TileSize, TerrainTileQuads, TerrainViewDistance, ViewDistance, ViewFadeMargin);
 
-        GD.Print($":: WorldLoader: {_data.Objects.Count} objects across {_tiles.Count} populated tiles ({TileSize:F0} m).");
+        int populated = 0;
+        foreach (WorldTile t in _tiles.Values) if (t.Count > 0) populated++;
+        GD.Print($":: WorldLoader: {_data.Objects.Count} objects, {_tiles.Count} terrain tiles ({populated} populated), {TileSize:F0} m.");
+    }
+
+    private void BuildTileGrid()
+    {
+        int side = Mathf.RoundToInt(_data.WorldExtent / TileSize);   // 8000 / 250 = 32  ->  1024 tiles
+        for (int iz = 0; iz < side; iz++)
+        for (int ix = 0; ix < side; ix++)
+        {
+            var key = (ix, iz);
+            var tile = new WorldTile { Name = $"Tile_{ix}_{iz}", Center = TileCenter(key) };
+            tile.Position = tile.Center;     // tile node sits at the tile centre (TASK04 §4)
+            _tiles[key] = tile;
+            AddChild(tile);
+        }
     }
 
     private void BucketObjects()
@@ -55,15 +74,8 @@ public partial class WorldLoader : Node3D
         {
             Vector3 p = o.Xform.Origin;
             sum += p;
-            (int, int) key = TileOf(p.X, p.Z);
-            if (!_tiles.TryGetValue(key, out WorldTile tile))
-            {
-                tile = new WorldTile { Name = $"Tile_{key.Item1}_{key.Item2}", Center = TileCenter(key) };
-                tile.Position = tile.Center;       // tile node sits at the tile centre (see §4)
-                _tiles[key] = tile;
-                AddChild(tile);
-            }
-            tile.Add(o);
+            if (_tiles.TryGetValue(TileOf(p.X, p.Z), out WorldTile tile))
+                tile.Add(o);                 // full grid exists; an out-of-bounds object (shouldn't happen) is skipped
         }
         CityCenter = _data.Objects.Count > 0 ? sum / _data.Objects.Count : Vector3.Zero;
     }

@@ -28,4 +28,32 @@ public partial class WorldData : Resource
     // deterministic by the generator's fixed iteration. If load cost ever bites at full density, the spec's
     // fallback is parallel typed arrays behind the same API — NOT a Task-3 concern.
     [Export] public Godot.Collections.Array<PlacedObject> Objects { get; set; } = new();
+
+    // ── Runtime sampling (Task 5) — additive, NOT serialised (no [Export]); world_8km.res unchanged. ──
+    // Real elevation (metres) at world (x,z): bilinear over the normalised heightmap, then Lerp(MinY,MaxY).
+    // MUST stay byte-identical to WorldGenerator.SampleHeight so terrain rises to EXACTLY meet the baked
+    // building bases (TASK05 §4). The city plateau is flat, so towers there seat perfectly regardless.
+    public float HeightAt(float x, float z)
+    {
+        int n = HeightmapResolution;
+        float half = WorldExtent * 0.5f, cell = WorldExtent / n;
+        float gx = Mathf.Clamp((x + half) / cell - 0.5f, 0.0f, n - 1.001f);
+        float gz = Mathf.Clamp((z + half) / cell - 0.5f, 0.0f, n - 1.001f);
+        int ix = (int)gx, iz = (int)gz;
+        int ix1 = Mathf.Min(ix + 1, n - 1), iz1 = Mathf.Min(iz + 1, n - 1);
+        float tx = gx - ix, tz = gz - iz;
+        float h0 = Mathf.Lerp(Heights[iz * n + ix], Heights[iz * n + ix1], tx);
+        float h1 = Mathf.Lerp(Heights[iz1 * n + ix], Heights[iz1 * n + ix1], tx);
+        return Mathf.Lerp(MinY, MaxY, Mathf.Lerp(h0, h1, tz));
+    }
+
+    // Coarse biome of the heightmap cell containing world (x,z). Mirrors WorldGenerator.BiomeAt verbatim.
+    public Biome BiomeAt(float x, float z)
+    {
+        int n = HeightmapResolution;
+        float half = WorldExtent * 0.5f, cell = WorldExtent / n;
+        int ix = Mathf.Clamp((int)((x + half) / cell), 0, n - 1);
+        int iz = Mathf.Clamp((int)((z + half) / cell), 0, n - 1);
+        return (Biome)Biomes[iz * n + ix];
+    }
 }
