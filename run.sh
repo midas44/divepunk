@@ -41,6 +41,7 @@ Usage: ./run.sh [command]
   build           Compile the C# solution (dotnet build -c Debug) — run before headless
   check           Headless smoke-test: import, run 180 frames, quit (exit 0 = OK)
   bake            Headless bake of the world -> res://world/world_8km.res (run build first)
+  modelgen        Headless generate the test glTF -> res://assets/models/test_tower.glb (run build first)
   import          Headless import only (regenerate .godot/)
   export-linux    Export release Linux  -> $BUILD_DIR/divepunk.x86_64
   export-android  Export release Android -> $BUILD_DIR/divepunk.apk
@@ -76,6 +77,13 @@ case "$cmd" in
 		echo ":: baking world -> res://world/world_8km.res ..."
 		"$GODOT_BIN" --headless --path . res://scenes/tools/Bake.tscn --quit-after 600
 		echo ":: bake done"
+		;;
+	modelgen)
+		echo ":: importing..."
+		"$GODOT_BIN" --headless --path . --import
+		echo ":: generating test model -> res://assets/models/test_tower.glb ..."
+		"$GODOT_BIN" --headless --path . res://scenes/tools/ModelGen.tscn --quit-after 120
+		echo ":: model gen done (the next --import will import the new .glb)"
 		;;
 	import)
 		exec "$GODOT_BIN" --headless --path . --import
