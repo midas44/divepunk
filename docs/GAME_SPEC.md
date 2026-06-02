@@ -299,15 +299,21 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - [x] `MeshRegistry.TrySwapGltf` loads `assets/models/test_tower.glb`, normalizes its mesh to the centered 1×1×1 unit box (per-axis AABB fit baked into a fresh single-surface `ArrayMesh`), reuses the shared `building.gdshader`, and swaps it into **`BuildingTaper` + `BuildingRound`** — purely a registry change, fail-soft to the procedural mesh on any miss. A headless `GltfDocument` generator (`./run.sh modelgen`) authors the test model. *(Verified: `world_8km.res` byte-identical — sha unchanged + not in the commit — and `TileBuilder`/`WorldGenerator`/bake untouched; same 315-object headless load; the swap fires headless with no fallback warning; a GPU render shows the stepped-tower-with-antenna silhouette on those types, correctly seated/sized, still MultiMesh-instanced.)*
 - **Goal:** a type renders from glTF purely by a registry change; transforms line up; the bake is untouched.
 
+### Task 9 — World rescale ×5 + realistic units
+- [ ] Scale the map **and** city ~5× in linear extent (`[world] extent` 8 km → 40 km) by scaling `WorldGenerator`'s metre **constants** (horizontal ×5, heights ≈×1.5–2 to fix the needle-thin aspect, `Block` widened), scaling the loader's tile/view knobs + `[camera] far` + fog — then **re-bake** (determinism preserved). Scale constants, not the algorithm.
+- **Goal:** the world reads ~5× bigger with believable proportions, renders + holds FPS, same seed re-bakes byte-identical. → brief: [`TASK09-world-rescale-realistic-units.md`](tasks/TASK09-world-rescale-realistic-units.md)
+
+### Task 10 — Collision solidity & comfort
+- [ ] Fix the car falling **through** the city ground (tunnel-proof near-field collider — `HeightMapShape3D` / solid plateau box), make all static colliders tunnel-proof at the speed clamp, add a **recover / flip-upright** key + a **near-ground hover / landing assist**.
+- **Goal:** descend onto a street and bounce (slow drift **and** fast dive), recover frees a wedged car, you can settle + land; condition drops, the game never ends. → source brief: [`BACKLOG …§3.2`](tasks/BACKLOG-world-rescale-physics-and-palette.md) (promote to `TASK10-*.md` when scheduled).
+
+### Task 11 — Dystopian palette re-grade
+- [ ] Pull the warm reddish Task-6 dusk toward a **darker, colder dystopian** palette (subtle dark cyan/violet/gray) across sun/fog/sky/water/terrain — **neon preserved**. *(Changes the §7.6 "synthwave dusk" art direction — update §7.6 + §11 on completion.)*
+- **Goal:** the scene reads cold + dark + dystopian, distance fades cold, land/sea cold-but-legible, neon still blooms. → source brief: [`BACKLOG …§3.3`](tasks/BACKLOG-world-rescale-physics-and-palette.md) (promote to `TASK11-*.md` when scheduled).
+
 ### Backlog (post-foundation)
 Objectives/missions → economy → traffic AI behaviour → day/night & weather → real art (buildings,
 the player car) → interiors → audio design → Android. Prioritize against [Open Decisions](#11-open-decisions).
-
-**Bundled backlog brief (unnumbered; runs after Tasks 7–8):**
-[`docs/tasks/BACKLOG-world-rescale-physics-and-palette.md`](tasks/BACKLOG-world-rescale-physics-and-palette.md) — a
-ready-to-implement, four-pass task: **world rescale ×5 + realistic units** (re-bake), **collision solidity + comfort**
-(solid ground / anti-tunnel / recover key / hover-landing assist), and a **cold dystopian palette re-grade**
-(cyan/violet/gray — note it *changes* the §7.6 "synthwave dusk" art direction). Give it a roadmap number when scheduled.
 
 ---
 

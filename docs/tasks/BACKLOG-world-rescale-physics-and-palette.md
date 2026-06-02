@@ -11,6 +11,13 @@
 > testing the car; it is **larger than a normal single-session task**. Tackle it as **four sequential sub-passes**
 > (§3.0–§3.3), each ending in its own `build + check + playtest + commit`. You may split the passes across sittings.
 
+> **🔢 UPDATE — decomposed into the §9 roadmap (2026-06-02, session A).** This bundle is now **three numbered tasks**:
+> **§3.0 Finalize dynamics → ✅ done** (committed `e1c2e99`); **§3.1 → Task 9**, promoted to the authoritative standalone
+> brief [`TASK09-world-rescale-realistic-units.md`](TASK09-world-rescale-realistic-units.md) — **use that, not §3.1
+> below**; **§3.2 → Task 10** and **§3.3 → Task 11**, whose **§3.2 / §3.3 sections below are their source briefs** until
+> session A promotes each to its own `TASK10/11-*.md`. The dependency order (9 → 10 → 11) and all technical detail
+> below are unchanged.
+
 > **What this task is.** Four things, in dependency order:
 > 1. **Finalize the in-flight dynamics baseline** (§3.0) — commit the confirmed car-feel tuning that's currently
 >    uncommitted, and clean the tree of temp diagnostics. *(Small — may already be committed by session A; verify.)*
