@@ -1,171 +1,127 @@
 using Godot;
 using System.Collections.Generic;
 
-// Moving "traffic" — cars cruising the corridor in both directions at random speeds (M3+).
-//
-// A pool of code-moved StaticBody3D cars that live on the OBSTACLE layer and in the obstacle
-// group, so the ship's existing crash / near-miss shape queries (Ship.cs) detect them with no
-// extra wiring — exactly like the static obstacles, but these move. Cars occupy a Z-window
-// around the ship and recycle (fresh random position / speed / direction) when they drift out
-// of range, so the population stays constant no matter how far you fly (no per-frame
-// instantiate / free). Their colour is a distinct hot magenta so they read instantly as moving
-// hazards, separate from the amber static obstacles and the blue buildings.
+// Ambient flying traffic — a FIXED population of collidable cars roaming the bounded ~8 km world
+// (open-world reframe). No AI: each car gets a random position, altitude, horizontal heading and speed
+// at spawn, then cruises in a straight line forever, toroidally wrapping at the world edge so the
+// population never leaves the box and never needs respawning. Cars are AnimatableBody3D with
+// SyncToPhysics on, so Jolt imparts their motion to the player on contact (a real shove + impulse →
+// damage via Ship._IntegrateForces). They live on the player's collision layer (1) and mask NOTHING (0),
+// so they ignore buildings / terrain / each other (no jitter, no avoidance) and only ever matter when the
+// player flies into one. Hot magenta hazard shader so they read as moving hazards. Fully deterministic
+// from Seed (no Randomize) → identical population every launch.
 [GlobalClass]
 public partial class Traffic : Node3D
 {
-	private const string ObstacleGroup = "obstacle";
-	private const int ObstacleLayer = 2;          // 1-indexed physics layer for obstacles (matches Ship.cs / project.godot)
-
-	// Shared M4 hazard shader (pulsing emissive + fresnel rim) — same one the static obstacles use.
+	// Shared hazard shader (pulsing emissive + fresnel rim) — same one the static obstacles used.
 	private static readonly Shader HazardShader = GD.Load<Shader>("res://shaders/hazard.gdshader");
 
-	[ExportGroup("Traffic")]
-	[Export] public int CarCount = 24;               // how many moving cars exist at once (the pool size)
-	[Export] public float MinSpeed = 30.0f;          // slowest car cruise speed (m/s)
-	[Export] public float MaxSpeed = 140.0f;         // fastest car cruise speed (m/s)
-	[Export(PropertyHint.Range, "0,1")] public float TowardFraction = 0.5f;  // fraction of cars heading TOWARD the player (+Z)
-
-	[ExportGroup("Window")]
-	[Export] public float SpawnAhead = 2800.0f;      // how far ahead (-Z) of the ship cars live / re-enter
-	[Export] public float SpawnBehind = 600.0f;      // how far behind (+Z) the ship a car persists before recycling
-
-	[ExportGroup("Corridor")]
-	[Export] public float CorridorHalfWidth = 120.0f;
-	[Export] public float CorridorFloor = 4.0f;
-	[Export] public float CorridorCeiling = 1700.0f;
-	[Export(PropertyHint.Range, "0,1")] public float XFraction = 0.9f;   // cars span ± this fraction of the corridor half-width
-	[Export(PropertyHint.Range, "0,1")] public float YFraction = 0.9f;   // ...and this fraction of the floor→ceiling height, centred
+	[ExportGroup("Population")]
+	[Export] public int Count = 24;                                     // fixed number of cars (built once in _Ready)
+	[Export] public float MinSpeed = 25.0f;                            // slowest cruise (m/s)
+	[Export] public float MaxSpeed = 80.0f;                            // fastest cruise (m/s) — keep well under [flight] max_speed (200) so hits land
+	[Export] public Vector2 AltitudeBand = new Vector2(60.0f, 400.0f); // (min,max) cruise altitude (world Y): above the streets, below the megatowers
+	[Export] public float SpawnRadius = 1500.0f;                       // cars start within this radius (m) of the world centre
 
 	[ExportGroup("Car")]
 	[Export] public Vector3 CarSize = new Vector3(5.0f, 2.0f, 9.0f);   // a touch bigger than the player car so it reads as traffic
-	[Export] public bool HazardPulse = true;         // pulsing-emissive + fresnel telegraph shader
+	[Export] public bool HazardPulse = true;                           // pulsing-emissive telegraph shader ([fx] hazard_pulse)
 
 	[ExportGroup("Generation")]
-	[Export] public int WorldSeed = 0;               // 0 = random; >0 = reproducible initial layout
+	[Export] public int Seed = 1337;                                   // deterministic layout seed (any int)
 
 	// Shared mesh + material across every car (one allocation, not one per car).
 	private static BoxMesh _carMesh;
 	private static ShaderMaterial _carMat;
 
-	private Node3D _target;
-	private List<StaticBody3D> _cars = new();
-	private List<float> _velZ = new();     // per-car signed Z velocity (m/s): + heads toward the player
-	private RandomNumberGenerator _rng = new RandomNumberGenerator();
+	// Runtime context pushed in by Game before AddChild (world facts, not Inspector tunables).
+	private float _extent = 8000.0f;
+	private Vector3 _center = Vector3.Zero;
+
+	private readonly List<AnimatableBody3D> _cars = new();
+	private readonly List<Vector3> _velocities = new();
+	private readonly RandomNumberGenerator _rng = new RandomNumberGenerator();
+
+	// Game calls this BEFORE AddChild so _Ready builds the population with the real world extent + centre.
+	public void Initialize(float worldExtent, Vector3 worldCenter)
+	{
+		_extent = worldExtent;
+		_center = worldCenter;
+	}
 
 	public override void _Ready()
 	{
-		long s = WorldSeed > 0 ? WorldSeed : RandomSeed();
-		_rng.Seed = (ulong)s;
-		BuildPool();
+		_rng.Seed = (ulong)Seed;   // deterministic: any int (incl. 0 / negative) is a valid, stable seed
+		BuildPopulation();
 	}
 
-	public void SetTarget(Node3D t)
-	{
-		_target = t;
-		if (_target != null)
-			ScatterInitial(_target.GlobalPosition.Z);
-	}
-
+	// One straight-line move per car per physics tick, then toroidal wrap on the world bounds. Runs in
+	// _PhysicsProcess (NOT _Process) so SyncToPhysics feeds Jolt the per-tick motion → real contact impulse.
+	// Uses LOCAL Position: the Traffic node sits at the world origin, so a car's local position IS its world
+	// position, and staying in local space sidesteps the sync_to_physics global-transform timing quirks.
 	public override void _PhysicsProcess(double delta)
 	{
-		if (_target == null)
-			return;
 		float d = (float)delta;
-		float shipZ = _target.GlobalPosition.Z;
+		float half = _extent * 0.5f;
 		for (int i = 0; i < _cars.Count; i++)
 		{
-			StaticBody3D car = _cars[i];
-			Vector3 p = car.Position;
-			p.Z += _velZ[i] * d;
-			car.Position = p;
-			// Recycle when the car drifts out of the window around the ship (ahead = -Z).
-			if (p.Z > shipZ + SpawnBehind || p.Z < shipZ - SpawnAhead)
-				Respawn(i, shipZ);
+			Vector3 p = _cars[i].Position + _velocities[i] * d;
+			// Wrap on X/Z. A single tick can't move further than `extent`, so one add/subtract suffices.
+			// The wrap seam sits at the world edge (~km from the player's usual position), so its one-frame
+			// transform jump never teleports a car onto the player.
+			if (p.X > half) p.X -= _extent; else if (p.X < -half) p.X += _extent;
+			if (p.Z > half) p.Z -= _extent; else if (p.Z < -half) p.Z += _extent;
+			_cars[i].Position = p;   // basis is fixed at spawn; only the position changes
 		}
 	}
 
-	// Build the car pool once (StaticBody3D + Col + Mesh), hidden until placed.
-	private void BuildPool()
+	private void BuildPopulation()
 	{
-		for (int i = 0; i < Mathf.Max(CarCount, 0); i++)
+		for (int i = 0; i < Mathf.Max(Count, 0); i++)
 		{
-			var car = new StaticBody3D();
-			car.Name = $"Car{i}";
-			car.CollisionLayer = 0;
-			car.SetCollisionLayerValue(ObstacleLayer, true);   // detectable on the obstacles layer
-			car.CollisionMask = 0;                             // cars detect nothing themselves
-			car.AddToGroup(ObstacleGroup);
+			// Uniform-area disc around the world centre + a random cruise altitude.
+			float r = Mathf.Sqrt(_rng.Randf()) * SpawnRadius;
+			float discAngle = _rng.Randf() * Mathf.Tau;
+			float y = _rng.RandfRange(AltitudeBand.X, AltitudeBand.Y);
+			Vector3 pos = new Vector3(_center.X + Mathf.Cos(discAngle) * r, y, _center.Z + Mathf.Sin(discAngle) * r);
 
-			var col = new CollisionShape3D();
-			col.Name = "Col";
-			var box = new BoxShape3D();
-			box.Size = CarSize;
-			col.Shape = box;
-			car.AddChild(col);
+			// Random horizontal heading (Y == 0 → never parallel to Up) + constant speed.
+			float headAngle = _rng.Randf() * Mathf.Tau;
+			Vector3 heading = new Vector3(Mathf.Cos(headAngle), 0.0f, Mathf.Sin(headAngle)); // unit, horizontal
+			float speed = _rng.RandfRange(MinSpeed, MaxSpeed);
 
-			var mesh = new MeshInstance3D();
-			mesh.Name = "Mesh";
-			mesh.Mesh = GetCarMesh();                // shared unit cube...
-			mesh.MaterialOverride = GetCarMat(HazardPulse);
-			mesh.Scale = CarSize;                     // ...scaled to the car size
-			car.AddChild(mesh);
+			var car = new AnimatableBody3D
+			{
+				Name = $"Car{i}",
+				SyncToPhysics = true,   // Jolt imparts the car's motion to the player on contact (so move it in _PhysicsProcess)
+				CollisionLayer = 1,     // share the player's layer so the player (mask 1) collides → bounce + damage
+				CollisionMask = 0,      // scan nothing: ignore buildings / terrain / other cars (no avoidance, no jitter)
+			};
+			car.AddToGroup("traffic");
 
-			car.Visible = false;
+			car.AddChild(new CollisionShape3D { Name = "Col", Shape = new BoxShape3D { Size = CarSize } });
+			car.AddChild(new MeshInstance3D
+			{
+				Name = "Mesh",
+				Mesh = GetCarMesh(),                       // shared unit cube...
+				Scale = CarSize,                           // ...scaled to the car size (visual only — does NOT touch the shape)
+				MaterialOverride = GetCarMat(HazardPulse),
+			});
+
+			// Place + orient in LOCAL space BEFORE AddChild. The Traffic node sits at the world origin, so a
+			// car's local transform IS its world transform. This is load-bearing: setting GlobalPosition in
+			// _Ready does NOT stick on a sync_to_physics body (it must be moved in _PhysicsProcess), which
+			// would otherwise leave every car piled at the origin. Build a proper (det +1) basis by hand so the
+			// box's long axis (local -Z) faces travel — LookAt can't run here (the node isn't in-tree yet).
+			Vector3 back = -heading;                                   // local +Z points opposite travel
+			Vector3 right = Vector3.Up.Cross(back).Normalized();
+			Vector3 up = back.Cross(right).Normalized();
+			car.Transform = new Transform3D(new Basis(right, up, back), pos);
 			AddChild(car);
+
 			_cars.Add(car);
-			_velZ.Add(0.0f);
+			_velocities.Add(heading * speed);
 		}
-	}
-
-	// Spread all cars randomly through the whole window on the first placement, so the world is
-	// populated immediately rather than streaming in from the far plane.
-	private void ScatterInitial(float shipZ)
-	{
-		float span = SpawnAhead + SpawnBehind;
-		for (int i = 0; i < _cars.Count; i++)
-		{
-			Respawn(i, shipZ);
-			StaticBody3D car = _cars[i];
-			Vector3 p = car.Position;
-			p.Z = shipZ + SpawnBehind - _rng.RandfRange(0.0f, span);
-			car.Position = p;
-		}
-	}
-
-	// (Re)place car i with a fresh random cross-section position, speed and direction, entering at
-	// whichever Z edge lets it traverse the window given its motion RELATIVE to the ship (which
-	// flies -Z). rel >= 0 => it drifts toward +Z (behind), so enter from the far-ahead edge;
-	// rel < 0 => it drifts toward -Z (ahead), so enter from behind. Without this, fast "away" cars
-	// spawned ahead would cross the ahead boundary on the very next frame and churn.
-	private void Respawn(int i, float shipZ)
-	{
-		StaticBody3D car = _cars[i];
-		float xSpan = CorridorHalfWidth * XFraction;
-		float yLo = Mathf.Lerp(CorridorFloor, CorridorCeiling, 0.5f - 0.5f * YFraction);
-		float yHi = Mathf.Lerp(CorridorFloor, CorridorCeiling, 0.5f + 0.5f * YFraction);
-		bool toward = _rng.Randf() < TowardFraction;
-		float vz = _rng.RandfRange(MinSpeed, MaxSpeed) * (toward ? 1.0f : -1.0f);
-		_velZ[i] = vz;
-
-		float playerSpeed = 0.0f;
-		if (_target is Ship ship)
-			playerSpeed = ship.GetSpeed();
-		float rel = vz + playerSpeed;
-		float z;
-		if (rel >= 0.0f)
-			z = shipZ - SpawnAhead + _rng.RandfRange(0.0f, SpawnAhead * 0.1f);
-		else
-			z = shipZ + SpawnBehind - _rng.RandfRange(0.0f, SpawnBehind * 0.5f);
-
-		car.Position = new Vector3(_rng.RandfRange(-xSpan, xSpan), _rng.RandfRange(yLo, yHi), z);
-		car.Visible = true;
-	}
-
-	private long RandomSeed()
-	{
-		var r = new RandomNumberGenerator();
-		r.Randomize();
-		return (long)r.Randi() + 1;   // +1 so it's never 0 (0 means "random")
 	}
 
 	// One shared unit-cube mesh for all cars (scaled per-car via MeshInstance3D.Scale).
@@ -179,9 +135,9 @@ public partial class Traffic : Node3D
 		return _carMesh;
 	}
 
-	// Hot magenta, pulsing + fresnel-rimmed (the shared hazard shader) — distinct from the amber static
-	// obstacles and the cool-blue buildings, so moving traffic reads instantly as a separate hazard.
-	// Cached statically; `pulse` is a global [fx] toggle (false = steady magenta).
+	// Hot magenta, pulsing + fresnel-rimmed (the shared hazard shader) — distinct from the buildings, so
+	// moving traffic reads instantly as a separate hazard. Cached statically; `pulse` is a global [fx]
+	// toggle (false = steady magenta). (Cooling this to the cold palette is a separate backlog pass.)
 	private static ShaderMaterial GetCarMat(bool pulse)
 	{
 		if (_carMat == null)

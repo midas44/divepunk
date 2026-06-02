@@ -24,6 +24,7 @@ public partial class Game : Node3D
 	private RainFX _rain;
 	private Hud _hud;
 	private WorldLoader _world;
+	private Traffic _traffic;
 
 	private bool _wasBoosting = false;
 
@@ -35,6 +36,7 @@ public partial class Game : Node3D
 		EnsureEnvironment();
 		SpawnShipAndCamera();
 		SpawnWorld();
+		SpawnTraffic();   // ambient flying cars roaming the bounded world (collidable hazards; no AI)
 		SpawnOcean();
 		SpawnUi();
 		SpawnScreenFx();
@@ -111,6 +113,39 @@ public partial class Game : Node3D
 		// ~(-1400,-200), well off the (0,30,0) spawn). Harmless if the load failed (CityCenter stays origin).
 		if (_world.CityCenter != Vector3.Zero)
 			_ship.GlobalPosition = _world.CityCenter + new Vector3(0.0f, 160.0f, 700.0f);
+	}
+
+	// Spawns the fixed ambient-traffic population — collidable flying cars that roam the bounded world and
+	// bounce/damage the player on contact (no AI, no streaming, no re-bake). Built right after the world so it
+	// can spawn around the city centroid. [traffic] count<=0 disables it.
+	private void SpawnTraffic()
+	{
+		if (GetNodeOrNull("Traffic") != null)
+			return;
+		int count = CfgInt("traffic", "count", 24);
+		if (count <= 0)
+			return;
+
+		_traffic = new Traffic { Name = "Traffic" };
+		ApplyTrafficConfig(_traffic);
+		_traffic.Initialize(CfgFloat("world", "extent", 8000.0f), _world?.CityCenter ?? Vector3.Zero);
+		AddChild(_traffic);   // _Ready() seeds the RNG + builds the deterministic population
+	}
+
+	// Pushes the config-driven traffic tunables onto the node before it enters the tree, so _Ready() builds
+	// the population with them. Each falls back to the node's own export default when the key is absent.
+	// (hazard_pulse lives in [fx] alongside the other telegraph toggles.)
+	private void ApplyTrafficConfig(Traffic t)
+	{
+		t.Count        = CfgInt("traffic", "count", t.Count);
+		t.MinSpeed     = CfgFloat("traffic", "min_speed", t.MinSpeed);
+		t.MaxSpeed     = CfgFloat("traffic", "max_speed", t.MaxSpeed);
+		t.SpawnRadius  = CfgFloat("traffic", "spawn_radius", t.SpawnRadius);
+		t.AltitudeBand = new Vector2(
+			CfgFloat("traffic", "altitude_min", t.AltitudeBand.X),
+			CfgFloat("traffic", "altitude_max", t.AltitudeBand.Y));
+		t.Seed         = CfgInt("traffic", "seed", t.Seed);
+		t.HazardPulse  = CfgBool("fx", "hazard_pulse", t.HazardPulse);
 	}
 
 	// A dusk ocean plane at sea level (world Y=0), under shaders/water.gdshader. Visual-only (no collider — you
