@@ -51,6 +51,9 @@ public partial class Ship : RigidBody3D
 		CanSleep = false;                    // always simulating, so input is always responsive
 		ContactMonitor = true;               // required to read contacts in _IntegrateForces
 		MaxContactsReported = 8;             // spec §7.4
+		ContinuousCd = true;                 // swept collision: a fast impact on a THIN collider (the flat
+		                                     // terrain/street plane) bounces instead of tunnelling straight
+		                                     // through at speed. Jolt resolves it with a linear cast.
 		PhysicsMaterialOverride = new PhysicsMaterial { Bounce = Bounce, Friction = Friction };
 
 		EnsureVisualAndCollision();          // neon-box Model + box CollisionShape3D (rotate WITH the body now)
