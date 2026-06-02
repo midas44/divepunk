@@ -17,14 +17,12 @@ public partial class Game : Node3D
 	[Export] public float ShakeOnBoost = 0.35f;            // camera punch the moment a boost kicks in
 	[Export] public float ShakeOnImpact = 0.9f;            // camera punch master-scale on a collision (× dent severity)
 
-	[ExportGroup("Test")]
-	[Export] public bool SpawnTestObstacles = true;        // void test field (boxes + floor) to ram; remove when the real world lands (Task 4)
-
 	private Ship _ship;
 	private CameraRig _rig;
 	private ScreenFX _fx;
 	private Hud _hud;
 	private MeshInstance3D _ground;
+	private WorldLoader _world;
 
 	private bool _wasBoosting = false;
 
@@ -35,6 +33,7 @@ public partial class Game : Node3D
 		CaptureMouse();
 		EnsureEnvironment();
 		SpawnShipAndCamera();
+		SpawnWorld();
 		SpawnTestField();
 		SpawnUi();
 		SpawnScreenFx();
@@ -96,12 +95,28 @@ public partial class Game : Node3D
 			_ship.Damage.Damaged += OnShipDamaged;
 	}
 
-	// A handful of obstacles + a ground collider in the empty void so bounce + damage are testable before
-	// the real world lands (Task 4). Gated by SpawnTestObstacles so it's trivially removable. Deterministic
-	// placement (no RNG) so the field is identical every launch.
+	// Loads + renders the baked 8 km city and drives its near-player colliders. Replaces the Task-2 test
+	// obstacles; the flat sea-level floor stays as a stand-in until Task 5 adds terrain + ocean.
+	private void SpawnWorld()
+	{
+		if (GetNodeOrNull("WorldLoader") != null)
+			return;
+		_world = new WorldLoader { Name = "WorldLoader" };
+		AddChild(_world);              // _Ready() loads world_8km.res + builds the tiles
+		_world.Player = _ship;         // drives the lazy colliders
+
+		// Convenience: start the run above the city so the playtest opens looking at it (the plateau is centred
+		// ~(-1400,-200), well off the (0,30,0) spawn). Harmless if the load failed (CityCenter stays origin).
+		if (_world.CityCenter != Vector3.Zero)
+			_ship.GlobalPosition = _world.CityCenter + new Vector3(0.0f, 160.0f, 700.0f);
+	}
+
+	// The temporary flat sea-level ground (top face at Y=0) so you can land/bounce before Task 5 adds real
+	// terrain + ocean. The Task-2 neon obstacle boxes are gone — the baked city (SpawnWorld) supersedes them.
+	// Idempotent; the visual RefGround (Game._ground) still follows the ship for the open void beyond the slab.
 	private void SpawnTestField()
 	{
-		if (!SpawnTestObstacles || GetNodeOrNull("TestField") != null)
+		if (GetNodeOrNull("TestField") != null)
 			return;
 
 		var field = new Node3D { Name = "TestField" };
@@ -119,52 +134,6 @@ public partial class Game : Node3D
 		floor.AddChild(floorCol);
 		floor.Position = new Vector3(0.0f, -5.0f, 0.0f);   // top face at Y=0
 		field.AddChild(floor);
-
-		// Emissive boxes scattered ahead (-Z) and around the spawn at varied heights, so you can fly out
-		// and ram them. Bright neon so they read against the dark void.
-		Vector3[] pos =
-		{
-			new Vector3(   0.0f, 20.0f, -200.0f),
-			new Vector3(  90.0f, 45.0f, -340.0f),
-			new Vector3(-130.0f, 15.0f, -300.0f),
-			new Vector3( 160.0f, 65.0f, -520.0f),
-			new Vector3( -70.0f, 35.0f, -560.0f),
-			new Vector3(  50.0f, 25.0f, -720.0f),
-		};
-		float[] sizes = { 40.0f, 60.0f, 30.0f, 70.0f, 35.0f, 50.0f };
-		Color[] tints =
-		{
-			new Color(1.0f, 0.2f, 0.6f),   // magenta
-			new Color(1.0f, 0.55f, 0.1f),  // orange
-			new Color(0.4f, 1.0f, 0.5f),   // green
-			new Color(0.6f, 0.4f, 1.0f),   // violet
-			new Color(1.0f, 0.85f, 0.2f),  // amber
-			new Color(0.2f, 0.8f, 1.0f),   // cyan
-		};
-
-		for (int i = 0; i < pos.Length; i++)
-		{
-			float s = sizes[i];
-			var body = new StaticBody3D { Name = $"Obstacle{i}" };
-			body.PhysicsMaterialOverride = bounceMat;
-
-			var col = new CollisionShape3D { Name = "Col" };
-			col.Shape = new BoxShape3D { Size = new Vector3(s, s, s) };
-			body.AddChild(col);
-
-			var mi = new MeshInstance3D { Name = "Mesh" };
-			mi.Mesh = new BoxMesh { Size = new Vector3(s, s, s) };
-			var mat = new StandardMaterial3D();
-			mat.AlbedoColor = tints[i] * 0.3f;
-			mat.EmissionEnabled = true;
-			mat.Emission = tints[i];
-			mat.EmissionEnergyMultiplier = 2.0f;
-			mi.MaterialOverride = mat;
-			body.AddChild(mi);
-
-			body.Position = pos[i];
-			field.AddChild(body);
-		}
 	}
 
 	// Spawns the in-run telemetry HUD (no scoring / game-over in the reframe).
