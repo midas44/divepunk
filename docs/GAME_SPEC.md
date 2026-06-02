@@ -280,7 +280,7 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - **Goal:** the bake writes `res://world/world_8km.res`; **same seed → identical bytes**; the validator prints sane counts.
 
 ### Task 4 — Runtime world load + tile-grid rendering *(joins Tasks 2 + 3)*
-- [ ] Add `WorldLoader`, `TileBuilder`, `MeshRegistry` (harvest `CityChunk`'s MultiMesh uploads + the unchanged building shader); lazy near-tile colliders; visibility-range LOD; `Game.cs` spawns the loader.
+- [x] Add `WorldLoader`, `TileBuilder`, `MeshRegistry` (harvest `CityChunk`'s MultiMesh uploads + the unchanged building shader); lazy near-tile colliders; visibility-range LOD; `Game.cs` spawns the loader.
 - **Goal:** the full baked 8 km city renders as MultiMesh batches, **identical every launch**, buildings solid (bounce + damage), far tiles cull into fog, FPS holds.
 
 ### Task 5 — Terrain + ocean + biomes
