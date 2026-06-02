@@ -233,12 +233,15 @@ public partial class Game : Node3D
 	{
 		if (GetNodeOrNull("Sun") == null)
 		{
-			// A dim, cool key light — just enough to model the towers; the city lights itself (emissive).
+			// A low, warm sunset key — long gold light raking the tower faces + desert. The city still lights
+			// itself (emissive); this just models the geometry and warms the lit faces. Shadows stay OFF
+			// (default) — a shadow-casting directional over 1024 terrain tiles is an FPS risk and the mood
+			// comes from colour/fog/glow, not shadows.
 			var sun = new DirectionalLight3D();
 			sun.Name = "Sun";
-			sun.Rotation = new Vector3(Mathf.DegToRad(-55.0f), Mathf.DegToRad(35.0f), 0.0f);
-			sun.LightColor = new Color(0.55f, 0.65f, 1.0f);
-			sun.LightEnergy = 0.35f;
+			sun.Rotation = new Vector3(Mathf.DegToRad(-18.0f), Mathf.DegToRad(35.0f), 0.0f);   // low on the horizon (raking)
+			sun.LightColor = new Color(1.0f, 0.62f, 0.38f);   // warm gold-orange sunset key
+			sun.LightEnergy = 0.6f;                            // a touch stronger warm key — tune vs neon wash-out
 			AddChild(sun);
 		}
 
@@ -251,16 +254,16 @@ public partial class Game : Node3D
 		}
 	}
 
-	// Assembles the neon-night Environment (M4 aesthetic pass, spec §7.7). The heavier desktop
+	// Assembles the synthwave-dusk Environment (Task 6 aesthetic pass, spec §7.6). The heavier desktop
 	// effects (volumetric fog, SSR, glow) are gated by settings.cfg [fx] so they can be dialled
 	// back for performance; the tasteful defaults match the export fallbacks here.
 	private Environment BuildEnvironment()
 	{
 		var env = new Environment();
 
-		// Neon-night sky: a procedural drifting-cloud sky (shader) with a glowing horizon band, or a
+		// Dusk sky: a procedural drifting-cloud sky (shader) with a warm golden-purple sunset band, or a
 		// plain dark sky + horizon band as a cheaper fallback (see BuildSky()). Ambient + reflections
-		// are sourced from it below, so the towers sit in a coherent night.
+		// are sourced from it below, so the towers sit in a coherent warm dusk.
 		env.BackgroundMode = Environment.BGMode.Sky;
 		env.Sky = BuildSky();
 
@@ -287,11 +290,11 @@ public partial class Game : Node3D
 		for (int lvl = 1; lvl <= 5; lvl++)
 			env.Set($"glow_levels/{lvl}", true);
 
-		// Exponential distance fog — depth cue that fades the FAR chunk edge into the horizon. Tuned for
-		// the long view: thin (so the city reads for kilometres) and a luminous neon-haze colour (so the
-		// distance fades to atmosphere, not to black), blended toward the sky band.
+		// Exponential distance fog — depth cue that fades the far edge into the horizon. Tuned for the long
+		// view: thin (so the basin reads for kilometres) and a WARM dusk-haze colour (so the distance fades
+		// to warm atmosphere, not cold blue/black) — the single biggest "warm & legible distance" lever.
 		env.FogEnabled = true;
-		env.FogLightColor = new Color(0.10f, 0.12f, 0.22f);
+		env.FogLightColor = new Color(0.42f, 0.26f, 0.30f);   // dusty mauve/peach dusk haze
 		env.FogDensity = CfgFloat("fx", "fog_density", 0.00018f);
 		// Keep the fog OFF the sky (low sky_affect): at 0.7 it flattened the horizon glow + clouds toward
 		// the dark fog colour, which read as "just darkness" above the rooftops. A little blends the far
@@ -299,11 +302,12 @@ public partial class Game : Node3D
 		env.FogSkyAffect = CfgFloat("fx", "fog_sky_affect", 0.15f);
 		env.FogAerialPerspective = 0.4f;
 
-		// Volumetric fog — the real mood layer (desktop): a faint neon-tinted haze with true depth.
+		// Volumetric fog — the real mood layer (desktop): a faint warm-tinted haze with true depth. Gated
+		// [fx] volumetric_fog (off by default); warmed here for if/when it's enabled.
 		env.VolumetricFogEnabled = CfgBool("fx", "volumetric_fog", true);
 		env.VolumetricFogDensity = CfgFloat("fx", "volumetric_fog_density", 0.005f);
-		env.VolumetricFogAlbedo = new Color(0.07f, 0.08f, 0.17f);
-		env.VolumetricFogEmission = new Color(0.05f, 0.02f, 0.10f);
+		env.VolumetricFogAlbedo = new Color(0.24f, 0.16f, 0.22f);     // warm dusk haze
+		env.VolumetricFogEmission = new Color(0.16f, 0.07f, 0.10f);   // faint warm self-glow
 		env.VolumetricFogEmissionEnergy = 0.4f;
 		env.VolumetricFogLength = CfgFloat("fx", "volumetric_fog_length", 6000.0f);
 		env.VolumetricFogGIInject = 0.2f;

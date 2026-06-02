@@ -2,20 +2,20 @@ using Godot;
 
 // Builds a tile's terrain MeshInstance3D (a heightmap slice -> ArrayMesh via SurfaceTool, per-vertex biome
 // COLOR, analytic normals) and its lazy trimesh collider. Terrain samples the SAME heightmap the bake used
-// (WorldData.HeightAt) so it rises to meet the baked building bases (TASK05 §4). One shared dusk material
-// (vertex colour as albedo); Task 6 retunes the palette/material for warm synthwave dusk.
+// (WorldData.HeightAt) so it rises to meet the baked building bases (TASK05 §4). Two cached dusk materials
+// (matte land + wet reflective city streets), both vertex-colour-as-albedo; Task 6 warms the palette.
 public static class TerrainBuilder
 {
     // Biome -> base colour, indexed by (int)Biome (Ocean,Beach,City,Desert,Hills,Mountains). LEGIBLE
     // starting values only — Task 6 retunes. (Ocean is the seabed: mostly hidden under the water plane.)
     private static readonly Color[] Palette =
     {
-        new(0.03f, 0.08f, 0.11f),  // Ocean     — dark teal seabed
-        new(0.60f, 0.52f, 0.37f),  // Beach     — warm sand
-        new(0.09f, 0.09f, 0.12f),  // City      — dark asphalt between the towers
-        new(0.52f, 0.39f, 0.25f),  // Desert    — warm tan
-        new(0.33f, 0.33f, 0.20f),  // Hills     — dusty olive
-        new(0.30f, 0.29f, 0.31f),  // Mountains — cool grey rock
+        new(0.04f, 0.06f, 0.10f),  // Ocean     — dusk seabed (mostly hidden under the water plane)
+        new(0.64f, 0.50f, 0.40f),  // Beach     — warm rosy sand
+        new(0.11f, 0.08f, 0.12f),  // City      — dark asphalt, nudged off cold (warm/violet, not blue-grey)
+        new(0.58f, 0.38f, 0.28f),  // Desert    — sunset-lit rosy tan
+        new(0.36f, 0.28f, 0.21f),  // Hills     — dusty umber/rose
+        new(0.34f, 0.28f, 0.33f),  // Mountains — mauve-grey dusk rock
     };
 
     private static StandardMaterial3D _mat;
@@ -24,8 +24,25 @@ public static class TerrainBuilder
         VertexColorUseAsAlbedo = true,
         Roughness = 0.92f,
         Metallic = 0.0f,
-        SpecularMode = BaseMaterial3D.SpecularModeEnum.Disabled,   // matte; the wet-street look is a Task-6 call
+        SpecularMode = BaseMaterial3D.SpecularModeEnum.Disabled,   // matte land (beach/desert/hills/mountains)
         CullMode = BaseMaterial3D.CullModeEnum.Disabled,           // double-sided: the hand-wound heightmap mesh renders both sides so terrain never backface-culls into torn fragments
+    };
+
+    // Wet-street variant for predominantly-City tiles (Task 6): keeps the dark-asphalt vertex colour but goes
+    // low-roughness with real specular + a faint clearcoat, so SSR ([fx] ssr) reflects the neon towers in the
+    // streets — the rainy-cyberpunk look. Cached like Material() — at most TWO terrain material instances
+    // exist for the whole world, regardless of tile count.
+    private static StandardMaterial3D _wetMat;
+    private static StandardMaterial3D WetMaterial() => _wetMat ??= new StandardMaterial3D
+    {
+        VertexColorUseAsAlbedo = true,                              // keep the dark-asphalt biome colour
+        Roughness = 0.14f,                                         // low -> SSR/specular catches the neon (wet)
+        Metallic = 0.0f,
+        MetallicSpecular = 0.6f,                                   // a touch hotter highlight than the 0.5 default
+        SpecularMode = BaseMaterial3D.SpecularModeEnum.SchlickGgx, // enable spec (the dry mat Disables it)
+        Clearcoat = 0.5f,                                          // faint wet-sheen coat on top
+        ClearcoatRoughness = 0.1f,
+        CullMode = BaseMaterial3D.CullModeEnum.Disabled,          // double-sided, identical to the dry mat
     };
 
     // A (quads+1)^2 vertex grid over the tile, sampled from the heightmap. Vertices are TILE-LOCAL in XZ
@@ -39,6 +56,7 @@ public static class TerrainBuilder
         float half = tileSize * 0.5f;
         float e = tileSize / quads * 0.5f;   // half-a-quad sample step for the analytic normal
 
+        int cityVerts = 0;   // tally City-biome verts -> a predominantly-city tile gets the wet-street material
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
         for (int j = 0; j <= quads; j++)
@@ -52,7 +70,9 @@ public static class TerrainBuilder
             float hL = data.HeightAt(wx - e, wz), hR = data.HeightAt(wx + e, wz);
             float hD = data.HeightAt(wx, wz - e), hU = data.HeightAt(wx, wz + e);
             st.SetNormal(new Vector3(hL - hR, 2.0f * e, hD - hU).Normalized());
-            st.SetColor(Palette[(int)data.BiomeAt(wx, wz)]);
+            Biome b = data.BiomeAt(wx, wz);   // reuse the sample for both the colour and the wet-street tally
+            if (b == Biome.City) cityVerts++;
+            st.SetColor(Palette[(int)b]);
             st.AddVertex(new Vector3(wx - tileCenter.X, y, wz - tileCenter.Z));   // tile-local XZ, world Y
         }
 
@@ -66,7 +86,9 @@ public static class TerrainBuilder
         }
 
         ArrayMesh mesh = st.Commit();
-        mesh.SurfaceSetMaterial(0, Material());
+        int totalVerts = (quads + 1) * (quads + 1);
+        bool wet = cityVerts * 2 >= totalVerts;   // City is the majority of the tile -> wet streets reflect the neon
+        mesh.SurfaceSetMaterial(0, wet ? WetMaterial() : Material());
         return new MeshInstance3D
         {
             Name = "Terrain",

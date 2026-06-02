@@ -1,22 +1,22 @@
 shader_type sky;
 
-// ── DIVEPUNK neon-night procedural sky (M4 view pass) ──
-// Dark zenith, a glowing neon band on the horizon (distant-city glow), a drifting
-// cloud layer whose undersides catch the neon, and optional faint stars. Gives the
-// long view some "landscape" above the rooftops. Built in code by game.gd; a few
+// ── DIVEPUNK synthwave-dusk procedural sky (Task 6 view pass) ──
+// Deep indigo/violet zenith, a warm golden-purple sunset band on the horizon, a drifting
+// cloud layer whose undersides catch the warm gold, and optional faint stars. Gives the
+// long view some "landscape" above the rooftops. Built in code by Game.cs; a few
 // uniforms are driven from settings.cfg [fx]. Procedural noise only — no textures.
 
 // Colours are deliberately bright here: ACES tonemapping (white point 6.0) + the eye adapting to
-// the neon city crushes dim values to black, so a "night sky" still needs healthy absolute values.
+// the neon city crushes dim values to black, so a dusk sky still needs healthy absolute values.
 // sky_energy is the master brightness multiplier (driven from settings.cfg [fx] sky_energy).
-uniform vec3 zenith_color : source_color = vec3(0.030, 0.040, 0.110);   // overhead — visible deep night-blue, NOT black
-uniform vec3 horizon_color : source_color = vec3(0.20, 0.10, 0.34);
-uniform vec3 glow_color : source_color = vec3(0.55, 0.22, 0.80);   // neon band sitting on the horizon (distant-city glow)
-uniform float horizon_falloff = 3.5;                              // lower = the glow spreads higher up the dome (more visible above rooftops)
+uniform vec3 zenith_color : source_color = vec3(0.08, 0.05, 0.22);   // overhead — deep indigo/violet, visibly there (NOT black)
+uniform vec3 horizon_color : source_color = vec3(0.50, 0.17, 0.42);  // magenta-rose mid band (the synthwave purple)
+uniform vec3 glow_color : source_color = vec3(0.85, 0.42, 0.28);   // gold-orange sunset band sitting low on the horizon
+uniform float horizon_falloff = 2.8;                             // lower = the glow spreads higher; tuned so gold stays low and magenta/violet read above it
 uniform float sky_energy = 1.5;
 
-uniform vec3 cloud_color : source_color = vec3(0.22, 0.20, 0.34);
-uniform vec3 cloud_lit_color : source_color = vec3(0.60, 0.32, 0.72);  // undersides catching the neon
+uniform vec3 cloud_color : source_color = vec3(0.28, 0.22, 0.36);
+uniform vec3 cloud_lit_color : source_color = vec3(1.0, 0.62, 0.45);  // undersides catching the warm gold sunset
 uniform float cloud_coverage = 0.5;   // 0 = clear, 1 = overcast
 uniform float cloud_density = 1.0;
 uniform float cloud_scale = 2.2;
