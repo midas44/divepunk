@@ -305,11 +305,11 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 
 ### Task 10 — Collision solidity & comfort
 - [ ] Fix the car falling **through** the city ground (tunnel-proof near-field collider — `HeightMapShape3D` / solid plateau box), make all static colliders tunnel-proof at the speed clamp, add a **recover / flip-upright** key + a **near-ground hover / landing assist**.
-- **Goal:** descend onto a street and bounce (slow drift **and** fast dive), recover frees a wedged car, you can settle + land; condition drops, the game never ends. → source brief: [`BACKLOG …§3.2`](tasks/BACKLOG-world-rescale-physics-and-palette.md) (promote to `TASK10-*.md` when scheduled).
+- **Goal:** descend onto a street and bounce (slow drift **and** fast dive), recover frees a wedged car, you can settle + land; condition drops, the game never ends. → source brief: [`BACKLOG …§3.2`](tasks/BACKLOG-world-rescale-physics-and-palette.md) (promote to `TASK10-*.md` when scheduled). *(Task-9 playtest: the tunnelling is asymmetric/speed-dependent — fast dive passes through, slow climb is solid — captured in §3.2.)*
 
 ### Task 11 — Dystopian palette re-grade
 - [ ] Pull the warm reddish Task-6 dusk toward a **darker, colder dystopian** palette (subtle dark cyan/violet/gray) across sun/fog/sky/water/terrain — **neon preserved**. *(Changes the §7.6 "synthwave dusk" art direction — update §7.6 + §11 on completion.)*
-- **Goal:** the scene reads cold + dark + dystopian, distance fades cold, land/sea cold-but-legible, neon still blooms. → source brief: [`BACKLOG …§3.3`](tasks/BACKLOG-world-rescale-physics-and-palette.md) (promote to `TASK11-*.md` when scheduled).
+- **Goal:** the scene reads cold + dark + dystopian, distance fades cold, land/sea cold-but-legible, neon still blooms (+ restore the cold fog haze the rescale thinned). → **brief:** [`TASK11-dystopian-palette-regrade.md`](tasks/TASK11-dystopian-palette-regrade.md) — **pulled ahead of Task 10** per playtest (palette is visual-only, no collision dependency).
 
 ### Backlog (post-foundation)
 Objectives/missions → economy → traffic AI behaviour → day/night & weather → real art (buildings,

@@ -229,6 +229,12 @@ and `settings/settings.cfg` (`[world] extent`, `[game] scale`, `[camera] far` �
 
 #### (A) The transparent city ground — the headline bug
 
+> **Task-9 playtest update (2026-06-02, user):** the tunnelling is **asymmetric** — a **fast descent from above passes
+> straight through**, but **coming back up from below the car is solid/blocked**. That rules out a missing/one-sided
+> collider and confirms **speed-dependent tunnelling** (a fast dive exceeds the thin trimesh's per-tick contact gap;
+> the slower climb stays in contact). The fixes below — a solid `HeightMapShape3D`/box that can't be tunnelled either
+> way, **plus** the hover/landing descent-speed cap (D / A.3) — target exactly this.
+
 **Symptom:** the car passes **through** the city street/ground instead of bouncing (user: *"ground is still
 transparent"*). **What's already been ruled out (don't re-investigate):** an instrumented run proved the terrain
 collider **is built, valid, and correct** — `Tile_8_15 terrain collider: 128 faces, layer=1, meshY [38.0..38.0]`
