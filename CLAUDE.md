@@ -1,7 +1,7 @@
 # CLAUDE.md — DIVEPUNK
 
 Open-world flying-car sandbox in a fixed, pre-baked cyberpunk coastal city at dusk. Fly anywhere in a
-bounded ≈8×8 km world; physics collisions cause **damage + bounce, never game-over**.
+bounded ≈40×40 km world; physics collisions cause **damage + bounce, never game-over**.
 **Full design, architecture, and the task roadmap live in `@docs/GAME_SPEC.md` — read it before implementing a task.**
 
 > **⚠️ Reframe in progress (2026-06).** The game is being rebuilt from an *infinite arcade score-corridor
@@ -24,7 +24,7 @@ Use the `run.sh` wrapper (auto-detects `godot-mono`). **C# must be compiled befo
 - Open in editor: `./run.sh editor`
 - Play the main scene: `./run.sh play`
 - Boot smoke-test (build, then import + 180-frame boot + quit): `./run.sh build && ./run.sh check`
-- Bake the world to `res://world/world_8km.res` (headless; **added in Task 3**): `./run.sh bake`
+- Bake the world to `res://world/world_main.res` (headless; **added in Task 3**): `./run.sh bake`
 - Export (configure the export presets in the editor first): `./run.sh export-linux`
 
 ## Code conventions
@@ -34,13 +34,13 @@ Use the `run.sh` wrapper (auto-detects `godot-mono`). **C# must be compiled befo
 - Prefer **signals** (`[Signal] delegate void XEventHandler(...)`; emit `EmitSignal(SignalName.X, …)`; connect `+=`) over tight cross-references. **Unsubscribe from autoload signals in `_ExitTree`** — C# doesn't auto-disconnect on free like GDScript did.
 - Use **framerate-independent smoothing**: `v.Lerp(target, 1.0f - Mathf.Exp(-k * (float)delta))`. Never a bare `Lerp(a, b, delta)`. Cast `delta` to `float` once; prefer `Mathf.*` (float) over `System.Math.*` (double); float literals need the `f` suffix.
 - Read input through **InputMap actions** (6-DOF flight: pitch/yaw via `steer_*`, plus `roll_*` and a thrust action; `cycle_camera`, …) — never hardcode keys in gameplay code.
-- **Bake determinism:** identical `(seed, extent)` must produce a byte-identical `world_8km.res`. Keep seeded-RNG call order/count stable; the seed-mix uses `long` + `unchecked` (C# `int` overflows differently); match half-away-from-zero rounding where it feeds loop counts (C# `Math.Round` is banker's). This matters once for the bake, not per-frame.
+- **Bake determinism:** identical `(seed, extent)` must produce a byte-identical `world_main.res`. Keep seeded-RNG call order/count stable; the seed-mix uses `long` + `unchecked` (C# `int` overflows differently); match half-away-from-zero rounding where it feeds loop counts (C# `Math.Round` is banker's). This matters once for the bake, not per-frame.
 
 ## Architecture rules (perf-critical — see the spec for detail)
-- The world is **fixed, finite (≈8×8 km), and baked once to disk** (`WorldData` resource → `res://world/world_8km.res`), then loaded at runtime. **No streaming, no per-run regeneration, no object pool ring.**
-- Repeated geometry (buildings, props) → **`MultiMeshInstance3D`** (GPU instancing), one batch per `ObjectType` per fixed **world tile** (≈250 m). Never spawn thousands of individual nodes.
+- The world is **fixed, finite (≈40×40 km), and baked once to disk** (`WorldData` resource → `res://world/world_main.res`), then loaded at runtime. **No streaming, no per-run regeneration, no object pool ring.**
+- Repeated geometry (buildings, props) → **`MultiMeshInstance3D`** (GPU instancing), one batch per `ObjectType` per fixed **world tile** (≈1250 m). Never spawn thousands of individual nodes.
 - The bake stores **object descriptors (type + transform + shader channels)**, not meshes — runtime instantiates via the `MeshRegistry` so visuals swap to glTF later with **zero re-bake**.
-- Cull/LOD with `VisibilityRangeBegin/End`; **fog hides the cull boundary.** Instantiate **colliders only near the car** (a small physics radius), not for all 8 km at once.
+- Cull/LOD with `VisibilityRangeBegin/End`; **fog hides the cull boundary.** Instantiate **colliders only near the car** (a small physics radius), not for all 40 km at once.
 - The flying car is a **`RigidBody3D`** (assisted-arcade 6-DOF: thrust + torques + PD auto-leveling). Collisions are **resolved by Jolt as a bounce**; damage accumulates from **contact impulse** in `_IntegrateForces`. **Health hitting zero does nothing — there is no game-over.**
 - Keep scenes small and single-responsibility (this makes AI-assisted edits far more reliable).
 
@@ -57,7 +57,7 @@ res://
 ├── CLAUDE.md                        # this file (lean — detail lives in docs/)
 ├── DIVEPUNK.csproj / DIVEPUNK.sln   # C# project (net8.0, Godot.NET.Sdk) — tracked
 ├── docs/GAME_SPEC.md                # full design + roadmap
-├── world/world_8km.res             # the baked world (data: heightmap + biomes + object descriptors)
+├── world/world_main.res             # the baked world (data: heightmap + biomes + object descriptors)
 ├── scenes/{main,player,world,ui}/   # .tscn scenes
 ├── scripts/                         # Ship.cs (RigidBody3D), CameraRig.cs, Game.cs, Traffic.cs, DamageComponent.cs, ...
 │   └── world/                        # WorldData, PlacedObject, WorldGenerator, WorldLoader, TileBuilder, MeshRegistry, WorldBakeTool

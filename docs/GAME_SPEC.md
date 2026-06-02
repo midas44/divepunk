@@ -84,7 +84,7 @@ loaded at runtime. No per-run regeneration, no streaming ring buffer.
   objects are placed.
 
 ### The bake (data, not geometry)
-The world is serialized as a **binary Godot `Resource` (`res://world/world_8km.res`)** holding
+The world is serialized as a **binary Godot `Resource` (`res://world/world_main.res`)** holding
 **layout data**, never baked meshes:
 - a **terrain heightmap** (normalised heights + resolution + min/max Y),
 - a coarse **biome map**,
@@ -159,7 +159,7 @@ without ever being "killed," and the world is identical every time you launch.
   gen — see [§7.7](#77-determinism).)
 - **Bake runners** — a `WorldBakeTool : EditorScript` (`[Tool]`) that calls `ResourceSaver.Save(...,
   Compress)`, **and** a headless `run.sh bake` path (saving *data* needs no GPU → CI-safe).
-- **File location** — `res://world/world_8km.res` (tracked authored content, shipped in the PCK).
+- **File location** — `res://world/world_main.res` (tracked authored content, shipped in the PCK).
   Player-generated worlds would later go to `user://`; the loader takes a path either way.
 
 ### 7.2 Runtime world load + tile-grid rendering
@@ -221,7 +221,7 @@ existing `building.gdshader` lays its windows out in **world space**, so it rend
 fixed-grid placement with **no shader change**.
 
 ### 7.7 Determinism
-The bake must be reproducible: identical `(seed, extent)` → byte-identical `world_8km.res`. Keep
+The bake must be reproducible: identical `(seed, extent)` → byte-identical `world_main.res`. Keep
 seeded-RNG call order/count stable; the seed-mix uses `long` + `unchecked` (C# `int` overflows
 differently from GDScript); match half-away-from-zero rounding where it feeds loop counts (C#
 `Math.Round` is banker's). This matters once for the bake, not per-frame.
@@ -242,7 +242,7 @@ actions. Camera free-look stays on the mouse. (Touch input is an Android-stage c
 | **Rewrite** | `scripts/Ship.cs` (→ `RigidBody3D` 6-DOF + impulse damage), `scripts/Game.cs` (orchestration around `WorldLoader`, no score/corridor), `scripts/Hud.cs` (condition bar, not score/combo), `scripts/Traffic.cs` (fixed roaming population) | Core mechanics change. |
 | **Harvest → delete** | `scripts/CityChunk.cs` (its MultiMesh/shader/mesh factories migrate to `TileBuilder`/`MeshRegistry`/`WorldGenerator`) | The geometry knowledge is gold; the corridor framing is not. |
 | **Delete** | `scripts/ChunkManager.cs`, `scripts/GameOver.cs`, `autoload/ScoreManager.cs` (+ its `project.godot` autoload entry), `scenes/world/ChunkManager.tscn`, `scenes/ui/GameOver.tscn` | Streaming, game-over, and scoring are gone. |
-| **Create** | `scripts/world/{WorldData,PlacedObject,WorldGenerator,WorldLoader,TileBuilder,MeshRegistry,WorldBakeTool}.cs`, `scripts/DamageComponent.cs`, `shaders/water.gdshader`, `res://world/world_8km.res` | The new pipeline. |
+| **Create** | `scripts/world/{WorldData,PlacedObject,WorldGenerator,WorldLoader,TileBuilder,MeshRegistry,WorldBakeTool}.cs`, `scripts/DamageComponent.cs`, `shaders/water.gdshader`, `res://world/world_main.res` | The new pipeline. |
 | **Edit** | `settings/settings.cfg` (new `[world]`/`[flight]`/`[damage]`; drop `[corridor]`/`[streaming]`/score keys), `project.godot` (drop ScoreManager autoload), `run.sh` (add `bake`) | New sections/commands. |
 | **Keep** | `docs/MIGRATION_GDSCRIPT_TO_CSHARP.md` | Still the valid C# conventions rulebook. |
 
@@ -277,7 +277,7 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 ### Task 3 — World data + bake pipeline *(riskiest; pure data, no rendering)*
 - [x] Add `WorldData` / `PlacedObject` / `ObjectType`, `WorldGenerator` (heightmap + coastline/bay/island/mountain masks + biome map + deterministic object placement on the city plateau).
 - [x] Add `WorldBakeTool` (EditorScript) + a `run.sh bake` headless path + a headless validator.
-- **Goal:** the bake writes `res://world/world_8km.res`; **same seed → identical bytes**; the validator prints sane counts.
+- **Goal:** the bake writes `res://world/world_main.res`; **same seed → identical bytes**; the validator prints sane counts.
 
 ### Task 4 — Runtime world load + tile-grid rendering *(joins Tasks 2 + 3)*
 - [x] Add `WorldLoader`, `TileBuilder`, `MeshRegistry` (harvest `CityChunk`'s MultiMesh uploads + the unchanged building shader); lazy near-tile colliders; visibility-range LOD; `Game.cs` spawns the loader.
@@ -296,11 +296,11 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - **Goal:** sparse cars roam in-bounds; bumping one = damage + bounce.
 
 ### Task 8 — glTF model-loading seam
-- [x] `MeshRegistry.TrySwapGltf` loads `assets/models/test_tower.glb`, normalizes its mesh to the centered 1×1×1 unit box (per-axis AABB fit baked into a fresh single-surface `ArrayMesh`), reuses the shared `building.gdshader`, and swaps it into **`BuildingTaper` + `BuildingRound`** — purely a registry change, fail-soft to the procedural mesh on any miss. A headless `GltfDocument` generator (`./run.sh modelgen`) authors the test model. *(Verified: `world_8km.res` byte-identical — sha unchanged + not in the commit — and `TileBuilder`/`WorldGenerator`/bake untouched; same 315-object headless load; the swap fires headless with no fallback warning; a GPU render shows the stepped-tower-with-antenna silhouette on those types, correctly seated/sized, still MultiMesh-instanced.)*
+- [x] `MeshRegistry.TrySwapGltf` loads `assets/models/test_tower.glb`, normalizes its mesh to the centered 1×1×1 unit box (per-axis AABB fit baked into a fresh single-surface `ArrayMesh`), reuses the shared `building.gdshader`, and swaps it into **`BuildingTaper` + `BuildingRound`** — purely a registry change, fail-soft to the procedural mesh on any miss. A headless `GltfDocument` generator (`./run.sh modelgen`) authors the test model. *(Verified: `world_main.res` byte-identical — sha unchanged + not in the commit — and `TileBuilder`/`WorldGenerator`/bake untouched; same 315-object headless load; the swap fires headless with no fallback warning; a GPU render shows the stepped-tower-with-antenna silhouette on those types, correctly seated/sized, still MultiMesh-instanced.)*
 - **Goal:** a type renders from glTF purely by a registry change; transforms line up; the bake is untouched.
 
 ### Task 9 — World rescale ×5 + realistic units
-- [ ] Scale the map **and** city ~5× in linear extent (`[world] extent` 8 km → 40 km) by scaling `WorldGenerator`'s metre **constants** (horizontal ×5, heights ≈×1.5–2 to fix the needle-thin aspect, `Block` widened), scaling the loader's tile/view knobs + `[camera] far` + fog — then **re-bake** (determinism preserved). Scale constants, not the algorithm.
+- [x] Scaled the map **and** city ~5× (`[world] extent` 8 km → **40 km**) via three factors in `WorldGenerator` — horizontal `WorldScale=5`, elevations `HeightScale=1.75`, density `BlockScale=1.5` — multiplied into the metre **constants** (algorithm/determinism kit untouched), plus the loader's tile/view knobs (`TileSize` 250→1250, view distances ×~5, `ColliderTileRadius` 2→1) + `[camera] far`/fog; renamed the baked `.res` → `world_main.res` (scale-agnostic); **re-baked**. *(Verified by session A: the committed bake, my re-bake, and session B's bake all sha `01b166e2…` — byte-identical & cross-session deterministic; build 0/0; loader `3423 objects, 1024 tiles, 1250 m`; the diff is constants-only; a GPU render shows the dense ~5× megacity fading to the mountain ring with neon intact. **The world is now ≈40×40 km** — the 8 km figures elsewhere in this spec are the original design baseline. Hands-on FPS/proportions feel is the standing playtest gate.)*
 - **Goal:** the world reads ~5× bigger with believable proportions, renders + holds FPS, same seed re-bakes byte-identical. → brief: [`TASK09-world-rescale-realistic-units.md`](tasks/TASK09-world-rescale-realistic-units.md)
 
 ### Task 10 — Collision solidity & comfort

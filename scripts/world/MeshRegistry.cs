@@ -43,7 +43,7 @@ public static class MeshRegistry
 
     // Task 8 — the glTF swap seam, exercised. Load the test .glb, normalize its mesh to the centered 1x1x1 unit
     // box the bake expects, reuse the shared building material, and replace the Taper + Round entries with it.
-    // PURELY a registry change: world_8km.res is untouched and TileBuilder is unchanged (the normalization keeps
+    // PURELY a registry change: world_main.res is untouched and TileBuilder is unchanged (the normalization keeps
     // the unit-mesh contract, so the baked per-instance (fx, height, fz) transforms size + seat it identically).
     // Fail-soft: any miss (asset not imported, no mesh) keeps the procedural meshes + warns — never crashes the
     // registry (it runs during world build, headless included).
