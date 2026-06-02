@@ -16,7 +16,7 @@
 ## 1. Vision & Differentiation
 
 You own a flying car in a **fixed, finite, lovingly-built cyberpunk city on a California-like ocean
-coast at golden-purple dusk.** You can fly **anywhere** — thread the neon canyons downtown, skim the
+coast at a cold, rain-streaked dystopian dusk.** You can fly **anywhere** — thread the neon canyons downtown, skim the
 bay, buzz the islands, climb to the desert hills ringing the basin. The car obeys **real physics**:
 bump a tower or the ground and you take **measurable damage and bounce off** — but you are never
 killed, never "game-over'd," never kicked back to a menu. The world is a **place you inhabit**, not a
@@ -113,8 +113,9 @@ model is a one-line registry change with **zero re-bake**. `FormatVersion` guard
    learning its geography. Bounded and knowable, not an infinite treadmill.
 5. **Freedom of movement [now].** Fly in **all directions**, land anywhere, hover, skim the water,
    crest the hills. No corridor, no rails, no forced forward motion.
-6. **Synthwave-dusk mood [now, polished later].** Golden-purple sunset over the bay; neon still glows;
-   desert and water stay warm and legible. Bridges cyberpunk and California.
+6. **Cold dystopian mood [re-graded Task 11].** A dark, cold cyan/violet/gray haze over the bay; neon still
+   glows hard against it; land and water stay cold but legible. Blade-Runner dystopia, not a warm sunset. *(Re-graded
+   from the original warm "synthwave dusk" — see §7.6.)*
 7. **Ambient life [soon].** Sparse AI traffic roaming the city — collidable, not a score hazard.
 8. **Deeper gameplay [later].** Objectives, economy, missions, factions, traffic behaviour, day/night
    — all TBD once the sandbox feels good. Intentionally unscoped here.
@@ -128,7 +129,7 @@ model is a one-line registry change with **zero re-bake**. `FormatVersion` guard
 - Coastal city (procedural placeholder geometry) + terrain (ocean/bay/islands/desert/hills) + water.
 - An assisted-arcade `RigidBody3D` flying car with full 6-DOF and **collision + bounce + damage**.
 - A condition (damage) HUD read-out. **No game-over.**
-- Synthwave-dusk aesthetic.
+- Cold dystopian aesthetic (cyan/violet/gray; re-graded in Task 11).
 - Sparse ambient AI traffic.
 - A glTF model-loading seam (proven on one or two object types).
 - Runs at 60 FPS on the dev desktop.
@@ -213,12 +214,16 @@ A signal-driven child of the car: `MaxHealth`, `ImpulseToDamage`, `MinImpulseThr
 **Health at zero does nothing** — no death, no reload. (Consequences are deferred, deeper gameplay.)
 Unsubscribe from any autoload signals in `_ExitTree` (the C# rule).
 
-### 7.6 Aesthetic — synthwave dusk
+### 7.6 Aesthetic — cold dystopian *(re-graded in Task 11; originally "synthwave dusk")*
 Reuse the existing `WorldEnvironment` stack (glow/bloom, exponential + volumetric fog, SSR, ACES
-tonemap) and the procedural sky shader, **retuned from neon-night to a warm golden-purple sunset** so
-the desert, water, and coastline read while neon still pops. All effects stay `[fx]`-gated. The
+tonemap) and the procedural sky shader. **Task 6** first retuned neon-night → a warm golden-purple
+sunset; **Task 11 re-graded that to a darker, colder, desaturated _dystopian_ palette** — cold
+cyan/violet/gray sky/fog/water/terrain, a dimmed steel-violet sun, and a cold distance haze — with the
+**neon still blooming** against the dark (the contrast that sells it). All effects stay `[fx]`-gated. The
 existing `building.gdshader` lays its windows out in **world space**, so it renders correctly for
-fixed-grid placement with **no shader change**.
+fixed-grid placement with **no shader change** (it was never touched). *(Colours live in the
+`Game.cs`/sky/water/terrain defaults; the intensities — `fog_density`, `sky_energy`, `exposure`,
+`saturation`, `glow` — are `settings.cfg [fx]` knobs.)*
 
 ### 7.7 Determinism
 The bake must be reproducible: identical `(seed, extent)` → byte-identical `world_main.res`. Keep
@@ -308,7 +313,7 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - **Goal:** descend onto a street and bounce (slow drift **and** fast dive), recover frees a wedged car, you can settle + land; condition drops, the game never ends. → source brief: [`BACKLOG …§3.2`](tasks/BACKLOG-world-rescale-physics-and-palette.md) (promote to `TASK10-*.md` when scheduled). *(Task-9 playtest: the tunnelling is asymmetric/speed-dependent — fast dive passes through, slow climb is solid — captured in §3.2.)*
 
 ### Task 11 — Dystopian palette re-grade
-- [ ] Pull the warm reddish Task-6 dusk toward a **darker, colder dystopian** palette (subtle dark cyan/violet/gray) across sun/fog/sky/water/terrain — **neon preserved**. *(Changes the §7.6 "synthwave dusk" art direction — update §7.6 + §11 on completion.)*
+- [x] Re-graded the warm Task-6 dusk to a **cold dystopian** palette (dark cyan/violet/gray) across sun/fog/sky/water/terrain + restored a **cold fog haze** (Task 9's `fog_density` ÷5 had thinned it to ~nothing) — **neon preserved**. *(Verified by session A: colours-only diff in `Game.cs`/`sky`/`water`/`TerrainBuilder` — `building.gdshader`/bake/collision untouched; build 0/0; a GPU render (session B's + my own) shows the red gamma gone, the cold haze restored, neon blooming against the dark, all legible. §7.6 + §11 re-graded above. Live-tuned `[fx]` in `settings.cfg`: `fog_density=0.00012`, `sky_energy=0.65`, `exposure=0.9`, `saturation=1.1`, `glow_intensity=0.2`.)*
 - **Goal:** the scene reads cold + dark + dystopian, distance fades cold, land/sea cold-but-legible, neon still blooms (+ restore the cold fog haze the rescale thinned). → **brief:** [`TASK11-dystopian-palette-regrade.md`](tasks/TASK11-dystopian-palette-regrade.md) — **pulled ahead of Task 10** per playtest (palette is visual-only, no collision dependency).
 
 ### Backlog (post-foundation)
@@ -334,6 +339,7 @@ the player car) → interiors → audio design → Android. Prioritize against [
 ## 11. Open Decisions
 
 - [x] **Flight control mapping** — *settled (Task 2 playtest):* WASD rotates the car (W/S pitch, A/D yaw + coordinated bank), Q/E roll, Tab cycles camera, mouse free-look; assisted auto-level on release. (A WASD-translate / mouse-aim scheme stays a possible future alternative.)
+- [x] **Art direction** — *settled (Task 11):* **cold dystopian** (dark cyan/violet/gray, neon glowing against a cold haze), re-graded from the original warm "synthwave dusk." See §7.6.
 - [ ] **Object density gradient** — uniform city, or dense core fading to sparse outskirts?
 - [ ] **Water as gameplay** — visual-only now; later add soft drag/damage in the bay, or keep it scenery?
 - [ ] **Damage consequences** — what (if anything) happens as condition drops (handling loss, forced landing, repair stations)?
