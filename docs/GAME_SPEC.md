@@ -292,7 +292,7 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - **Goal:** warm synthwave dusk; neon reads; desert + ocean warm and legible; FPS holds.
 
 ### Task 7 — Ambient AI traffic
-- [ ] Strip `Traffic.cs`'s recycle-window; a fixed population roams baked spawn points within the borders, collidable.
+- [x] Rewrote `Traffic.cs` into a fixed `AnimatableBody3D` population roaming the bounded world from deterministic (un-baked) spawn points, collidable on layer 1 (bump = bounce + damage via the existing impulse path). *(Collision contract / determinism / wrap verified by construction + headless + a GPU render; the hands-on hit-feel is the standing playtest gate.)*
 - **Goal:** sparse cars roam in-bounds; bumping one = damage + bounce.
 
 ### Task 8 — glTF model-loading seam
