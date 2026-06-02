@@ -284,7 +284,7 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - **Goal:** the full baked 8 km city renders as MultiMesh batches, **identical every launch**, buildings solid (bounce + damage), far tiles cull into fog, FPS holds.
 
 ### Task 5 — Terrain + ocean + biomes
-- [ ] Per-tile terrain mesh from the heightmap with biome vertex colours; near-tile trimesh colliders; `shaders/water.gdshader` + ocean plane at Y=0.
+- [x] Per-tile terrain mesh from the heightmap with biome vertex colours; near-tile trimesh colliders; `shaders/water.gdshader` + ocean plane at Y=0.
 - **Goal:** reads as a coastal city on an ocean with a bay + islands ringed by desert/hills; land on terrain, skim the water, thread the canyons; terrain solid.
 
 ### Task 6 — Synthwave dusk aesthetic pass
