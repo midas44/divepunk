@@ -296,7 +296,7 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - **Goal:** sparse cars roam in-bounds; bumping one = damage + bounce.
 
 ### Task 8 — glTF model-loading seam
-- [ ] Swap one or two placeholder meshes for an imported `.glb` via `MeshRegistry` — **same `world_8km.res`, zero re-bake**.
+- [x] `MeshRegistry.TrySwapGltf` loads `assets/models/test_tower.glb`, normalizes its mesh to the centered 1×1×1 unit box (per-axis AABB fit baked into a fresh single-surface `ArrayMesh`), reuses the shared `building.gdshader`, and swaps it into **`BuildingTaper` + `BuildingRound`** — purely a registry change, fail-soft to the procedural mesh on any miss. A headless `GltfDocument` generator (`./run.sh modelgen`) authors the test model. *(Verified: `world_8km.res` byte-identical — sha unchanged + not in the commit — and `TileBuilder`/`WorldGenerator`/bake untouched; same 315-object headless load; the swap fires headless with no fallback warning; a GPU render shows the stepped-tower-with-antenna silhouette on those types, correctly seated/sized, still MultiMesh-instanced.)*
 - **Goal:** a type renders from glTF purely by a registry change; transforms line up; the bake is untouched.
 
 ### Backlog (post-foundation)
