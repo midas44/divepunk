@@ -1,22 +1,22 @@
 shader_type sky;
 
-// ── DIVEPUNK synthwave-dusk procedural sky (Task 6 view pass) ──
-// Deep indigo/violet zenith, a warm golden-purple sunset band on the horizon, a drifting
-// cloud layer whose undersides catch the warm gold, and optional faint stars. Gives the
+// ── DIVEPUNK cold dystopian procedural sky (Task 11 re-grade of the Task 6 view pass) ──
+// Deep blue-violet zenith, a cold desaturated violet-gray band on the horizon, a drifting
+// cloud layer whose undersides catch a dim cold glow, and optional faint stars. Gives the
 // long view some "landscape" above the rooftops. Built in code by Game.cs; a few
 // uniforms are driven from settings.cfg [fx]. Procedural noise only — no textures.
 
 // Colours are deliberately bright here: ACES tonemapping (white point 6.0) + the eye adapting to
 // the neon city crushes dim values to black, so a dusk sky still needs healthy absolute values.
 // sky_energy is the master brightness multiplier (driven from settings.cfg [fx] sky_energy).
-uniform vec3 zenith_color : source_color = vec3(0.08, 0.05, 0.22);   // overhead — deep indigo/violet, visibly there (NOT black)
-uniform vec3 horizon_color : source_color = vec3(0.50, 0.17, 0.42);  // magenta-rose mid band (the synthwave purple)
-uniform vec3 glow_color : source_color = vec3(0.85, 0.42, 0.28);   // gold-orange sunset band sitting low on the horizon
-uniform float horizon_falloff = 2.8;                             // lower = the glow spreads higher; tuned so gold stays low and magenta/violet read above it
+uniform vec3 zenith_color : source_color = vec3(0.04, 0.05, 0.14);   // overhead — dark blue-violet, visibly there (NOT black)
+uniform vec3 horizon_color : source_color = vec3(0.16, 0.16, 0.26);  // desaturated violet-gray mid band (cold — kills the rose "red gamma")
+uniform vec3 glow_color : source_color = vec3(0.16, 0.26, 0.34);   // dim cold cyan-teal band sitting low on the horizon
+uniform float horizon_falloff = 3.4;                             // lower = the glow spreads higher; tighter/dimmer cold band
 uniform float sky_energy = 1.5;
 
 uniform vec3 cloud_color : source_color = vec3(0.28, 0.22, 0.36);
-uniform vec3 cloud_lit_color : source_color = vec3(1.0, 0.62, 0.45);  // undersides catching the warm gold sunset
+uniform vec3 cloud_lit_color : source_color = vec3(0.34, 0.44, 0.58);  // undersides catching a dim cold glow
 uniform float cloud_coverage = 0.5;   // 0 = clear, 1 = overcast
 uniform float cloud_density = 1.0;
 uniform float cloud_scale = 2.2;

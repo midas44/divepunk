@@ -3,11 +3,11 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
 // DIVEPUNK dusk ocean — a flat plane at world Y=0. Fragment-only (no vertex displacement): world-anchored
 // FBM ripples perturb the normal; a fresnel rim brightens at grazing angles (catches the horizon glow); a
-// depth-tinted base reads as deep water. Visual-only (no collision). Task 6 retunes for synthwave dusk.
+// depth-tinted base reads as deep water. Visual-only (no collision). Task 11 re-grades to cold dystopian.
 
-uniform vec3 deep_color : source_color = vec3(0.04, 0.05, 0.11);     // deep dusk teal-violet body
-uniform vec3 shallow_color : source_color = vec3(0.14, 0.12, 0.20);  // shallows lit toward mauve
-uniform vec3 fresnel_color : source_color = vec3(1.0, 0.50, 0.42);   // warm gold-pink rim catching the sunset at grazing angles
+uniform vec3 deep_color : source_color = vec3(0.03, 0.05, 0.09);     // deep cold teal-violet body
+uniform vec3 shallow_color : source_color = vec3(0.08, 0.12, 0.17);  // shallows, cold teal-violet
+uniform vec3 fresnel_color : source_color = vec3(0.35, 0.55, 0.70);  // cold cyan rim catching the cold sky at grazing angles
 uniform float fresnel_power = 4.0;
 uniform float water_roughness = 0.08;     // low -> SSR/specular catches the neon
 uniform float ripple_scale = 0.015;       // world-space ripple frequency (1/m)

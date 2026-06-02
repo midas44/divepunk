@@ -3,19 +3,19 @@ using Godot;
 // Builds a tile's terrain MeshInstance3D (a heightmap slice -> ArrayMesh via SurfaceTool, per-vertex biome
 // COLOR, analytic normals) and its lazy trimesh collider. Terrain samples the SAME heightmap the bake used
 // (WorldData.HeightAt) so it rises to meet the baked building bases (TASK05 §4). Two cached dusk materials
-// (matte land + wet reflective city streets), both vertex-colour-as-albedo; Task 6 warms the palette.
+// (matte land + wet reflective city streets), both vertex-colour-as-albedo; Task 11 re-grades to cold.
 public static class TerrainBuilder
 {
-    // Biome -> base colour, indexed by (int)Biome (Ocean,Beach,City,Desert,Hills,Mountains). LEGIBLE
-    // starting values only — Task 6 retunes. (Ocean is the seabed: mostly hidden under the water plane.)
+    // Biome -> base colour, indexed by (int)Biome (Ocean,Beach,City,Desert,Hills,Mountains). Cold,
+    // desaturated, but legible (dark != muddy black) — Task 11 re-grade. (Ocean is the seabed: mostly hidden.)
     private static readonly Color[] Palette =
     {
-        new(0.04f, 0.06f, 0.10f),  // Ocean     — dusk seabed (mostly hidden under the water plane)
-        new(0.64f, 0.50f, 0.40f),  // Beach     — warm rosy sand
-        new(0.11f, 0.08f, 0.12f),  // City      — dark asphalt, nudged off cold (warm/violet, not blue-grey)
-        new(0.58f, 0.38f, 0.28f),  // Desert    — sunset-lit rosy tan
-        new(0.36f, 0.28f, 0.21f),  // Hills     — dusty umber/rose
-        new(0.34f, 0.28f, 0.33f),  // Mountains — mauve-grey dusk rock
+        new(0.03f, 0.05f, 0.09f),  // Ocean     — cold seabed (mostly hidden under the water plane)
+        new(0.40f, 0.41f, 0.45f),  // Beach     — cold gray-sand, drained of warmth
+        new(0.09f, 0.09f, 0.12f),  // City      — dark cold asphalt
+        new(0.36f, 0.35f, 0.36f),  // Desert    — cold gray-tan dystopian dead ground
+        new(0.24f, 0.25f, 0.29f),  // Hills     — cold gray-violet
+        new(0.26f, 0.28f, 0.34f),  // Mountains — cold blue-gray rock
     };
 
     private static StandardMaterial3D _mat;
