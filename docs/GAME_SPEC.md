@@ -303,6 +303,12 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 Objectives/missions → economy → traffic AI behaviour → day/night & weather → real art (buildings,
 the player car) → interiors → audio design → Android. Prioritize against [Open Decisions](#11-open-decisions).
 
+**Bundled backlog brief (unnumbered; runs after Tasks 7–8):**
+[`docs/tasks/BACKLOG-world-rescale-physics-and-palette.md`](tasks/BACKLOG-world-rescale-physics-and-palette.md) — a
+ready-to-implement, four-pass task: **world rescale ×5 + realistic units** (re-bake), **collision solidity + comfort**
+(solid ground / anti-tunnel / recover key / hover-landing assist), and a **cold dystopian palette re-grade**
+(cyan/violet/gray — note it *changes* the §7.6 "synthwave dusk" art direction). Give it a roadmap number when scheduled.
+
 ---
 
 ## 10. Working with Claude Code
