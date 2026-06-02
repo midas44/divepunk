@@ -288,7 +288,7 @@ and **playtest between each**. Verify each with `./run.sh build && ./run.sh chec
 - **Goal:** reads as a coastal city on an ocean with a bay + islands ringed by desert/hills; land on terrain, skim the water, thread the canyons; terrain solid.
 
 ### Task 6 — Synthwave dusk aesthetic pass
-- [ ] Retune the `WorldEnvironment` + sky from neon-night to warm dusk/sunset; confirm neon still glows; retune `[fx]`.
+- [x] Retune the `WorldEnvironment` + sky from neon-night to warm dusk/sunset; confirm neon still glows; retune `[fx]`.
 - **Goal:** warm synthwave dusk; neon reads; desert + ocean warm and legible; FPS holds.
 
 ### Task 7 — Ambient AI traffic
