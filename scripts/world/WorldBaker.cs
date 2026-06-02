@@ -4,7 +4,7 @@ using Godot;
 // headless runner (BakeRunner) so there is ONE bake path. Saving DATA needs no GPU, so this is headless-safe.
 public static class WorldBaker
 {
-    public const string OutPath = "res://world/world_8km.res";
+    public const string OutPath = "res://world/world_main.res";
 
     public static Error Bake(int seed, float extent, string path = OutPath)
     {

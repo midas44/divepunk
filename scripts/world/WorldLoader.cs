@@ -10,17 +10,17 @@ using System.Collections.Generic;
 public partial class WorldLoader : Node3D
 {
     [ExportGroup("Source")]
-    [Export] public string WorldResPath = "res://world/world_8km.res";
+    [Export] public string WorldResPath = "res://world/world_main.res";
 
     [ExportGroup("Tiling / LOD")]
-    [Export] public float TileSize = 250.0f;          // ~32x32 over the 8 km world
-    [Export] public float ViewDistance = 5000.0f;     // per-tile VisibilityRangeEnd (fog hides the boundary)
-    [Export] public float ViewFadeMargin = 600.0f;     // dither-fade band before the cull end (applies to terrain + buildings)
-    [Export] public float TerrainViewDistance = 12000.0f; // terrain VisibilityRangeEnd: large enough to cover the whole bounded world (diagonal ≈11.3 km) so the distant mountain ring never dither-culls — it sat in the 5 km building fade band and fragmented. Terrain is cheap (~128 tris/tile); fog (Task 6) handles the far haze.
-    [Export] public int TerrainTileQuads = 8;          // terrain mesh resolution per tile (~1 heightmap cell per quad at 250 m)
+    [Export] public float TileSize = 1250.0f;         // ~32x32 over the 40 km world (Task 9 rescale; keeps the grid/MultiMesh structure ~1024 tiles)
+    [Export] public float ViewDistance = 15000.0f;    // per-tile VisibilityRangeEnd (fog hides the boundary)
+    [Export] public float ViewFadeMargin = 3000.0f;    // dither-fade band before the cull end (applies to terrain + buildings)
+    [Export] public float TerrainViewDistance = 55000.0f; // terrain VisibilityRangeEnd: large enough to cover the whole bounded world (diagonal ≈56 km at 40 km extent) so the distant mountain ring never dither-culls. Terrain is cheap (~128 tris/tile); fog handles the far haze.
+    [Export] public int TerrainTileQuads = 8;          // terrain mesh resolution per tile (~1 heightmap cell per quad at 1250 m tile / 156 m cell)
 
     [ExportGroup("Colliders")]
-    [Export] public int ColliderTileRadius = 2;       // tiles around the player kept collidable (±2 = ~500 m lookahead)
+    [Export] public int ColliderTileRadius = 1;       // tiles around the player kept collidable (±1 = ~1250 m lookahead at 1250 m tiles)
     [Export] public float ColliderBounce = 0.3f;      // match the car's PhysicsMaterial
     [Export] public float ColliderFriction = 0.4f;
 
@@ -55,7 +55,7 @@ public partial class WorldLoader : Node3D
 
     private void BuildTileGrid()
     {
-        int side = Mathf.RoundToInt(_data.WorldExtent / TileSize);   // 8000 / 250 = 32  ->  1024 tiles
+        int side = Mathf.RoundToInt(_data.WorldExtent / TileSize);   // 40000 / 1250 = 32  ->  1024 tiles
         for (int iz = 0; iz < side; iz++)
         for (int ix = 0; ix < side; ix++)
         {

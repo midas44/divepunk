@@ -106,13 +106,14 @@ public partial class Game : Node3D
 		if (GetNodeOrNull("WorldLoader") != null)
 			return;
 		_world = new WorldLoader { Name = "WorldLoader" };
-		AddChild(_world);              // _Ready() loads world_8km.res + builds the tiles
+		AddChild(_world);              // _Ready() loads world_main.res + builds the tiles
 		_world.Player = _ship;         // drives the lazy colliders
 
 		// Convenience: start the run above the city so the playtest opens looking at it (the plateau is centred
-		// ~(-1400,-200), well off the (0,30,0) spawn). Harmless if the load failed (CityCenter stays origin).
+		// ~(-7000,-1000) after the Task-9 rescale, well off the (0,30,0) spawn). The standoff scales with the
+		// ~5x-wider city so the opening frames the skyline, not its interior. Harmless if the load failed.
 		if (_world.CityCenter != Vector3.Zero)
-			_ship.GlobalPosition = _world.CityCenter + new Vector3(0.0f, 160.0f, 700.0f);
+			_ship.GlobalPosition = _world.CityCenter + new Vector3(0.0f, 800.0f, 3500.0f);
 	}
 
 	// Spawns the fixed ambient-traffic population — collidable flying cars that roam the bounded world and

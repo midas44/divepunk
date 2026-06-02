@@ -40,7 +40,7 @@ Usage: ./run.sh [command]
   editor          Open the project in the Godot editor
   build           Compile the C# solution (dotnet build -c Debug) — run before headless
   check           Headless smoke-test: import, run 180 frames, quit (exit 0 = OK)
-  bake            Headless bake of the world -> res://world/world_8km.res (run build first)
+  bake            Headless bake of the world -> res://world/world_main.res (run build first)
   modelgen        Headless generate the test glTF -> res://assets/models/test_tower.glb (run build first)
   import          Headless import only (regenerate .godot/)
   export-linux    Export release Linux  -> $BUILD_DIR/divepunk.x86_64
@@ -74,7 +74,7 @@ case "$cmd" in
 	bake)
 		echo ":: importing..."
 		"$GODOT_BIN" --headless --path . --import
-		echo ":: baking world -> res://world/world_8km.res ..."
+		echo ":: baking world -> res://world/world_main.res ..."
 		"$GODOT_BIN" --headless --path . res://scenes/tools/Bake.tscn --quit-after 600
 		echo ":: bake done"
 		;;

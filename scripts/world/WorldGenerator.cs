@@ -10,26 +10,37 @@ public static class WorldGenerator
     // ── Heightmap resolution ───────────────────────────────────────────────────────────────────────
     private const int N = 256;   // HeightmapResolution (bump WorldData.FormatVersion if you change it)
 
+    // ── World rescale factors (Task 9) ───────────────────────────────────────────────────────────────
+    // The map + city are ~5x larger in linear extent than the original 8 km bake. These multiply into the
+    // metre constants below, so the diff stays an obvious "x a factor" per value — which PRESERVES
+    // determinism: the RNG call order/count is untouched, only constant VALUES change. Horizontal geometry
+    // scales x WorldScale (noise FREQUENCIES divide by it, so feature wavelengths grow too and the world
+    // keeps its SHAPE — just bigger). Elevations scale x HeightScale (NOT x5: that would make ~4 km towers).
+    // Block scales x BlockScale (the city-density dial). Tune HeightScale / BlockScale on playtest.
+    private const float WorldScale  = 5.0f;    // positions, radii, spacing, shore/bay bands
+    private const float HeightScale = 1.75f;   // terrain elevations only (mountains, plateau, ocean depth, islands)
+    private const float BlockScale  = 1.5f;    // placement spacing — 1.5 = dense megacity (Task 9 choice)
+
     // ── Terrain layout consts (metres; world centred on origin, half = extent/2). LAND is the side where
     //    landSD > 0 — the city plateau sits there, above water. The LOOK is tuned in Task 5; these just
     //    need to be deterministic and produce ocean / beach / a flat city plateau / desert→hills→mountains.
-    private const float RingInner = 2400.0f, RingOuter = 4300.0f, MountH = 760.0f;     // radial mountain ring
-    private const float CityCx = -1400.0f, CityCz = -200.0f, CityR = 1500.0f, PlateauH = 38.0f;  // city plateau
-    private const float CoastX = 900.0f, CoastAmp = 520.0f, CoastFreq = 1.0f / 1500.0f, CoastNz = 300.0f; // coastline curve
-    private const float BayCx = 600.0f, BayCz = 1700.0f, BayR = 1400.0f, BayEdge = 650.0f;        // carved bay
-    private const float OceanDepth = 110.0f, BeachRise = 2.0f, OceanSlope = 16.0f;     // underwater shaping
-    private const float BeachBand = 420.0f, LandBase = 10.0f, RollAmp = 60.0f;         // shore ease + rolling land
+    private const float RingInner = 2400.0f * WorldScale, RingOuter = 4300.0f * WorldScale, MountH = 760.0f * HeightScale;     // radial mountain ring
+    private const float CityCx = -1400.0f * WorldScale, CityCz = -200.0f * WorldScale, CityR = 1500.0f * WorldScale, PlateauH = 38.0f * HeightScale;  // city plateau
+    private const float CoastX = 900.0f * WorldScale, CoastAmp = 520.0f * WorldScale, CoastFreq = 1.0f / (1500.0f * WorldScale), CoastNz = 300.0f * WorldScale; // coastline curve
+    private const float BayCx = 600.0f * WorldScale, BayCz = 1700.0f * WorldScale, BayR = 1400.0f * WorldScale, BayEdge = 650.0f * WorldScale;        // carved bay
+    private const float OceanDepth = 110.0f * HeightScale, BeachRise = 2.0f, OceanSlope = 16.0f * WorldScale;     // underwater shaping (BeachRise stays — a 2 m offset)
+    private const float BeachBand = 420.0f * WorldScale, LandBase = 10.0f * HeightScale, RollAmp = 60.0f * HeightScale;         // shore ease + rolling land
 
     // Island bumps (CX, CZ, R, H) — each pokes above the sea where its H beats the local ocean depth.
     private static readonly (float Cx, float Cz, float R, float H)[] Islands =
     {
-        (2200.0f, -1400.0f, 520.0f, 150.0f),
-        (2700.0f,   900.0f, 440.0f, 140.0f),
-        (1500.0f,  2700.0f, 360.0f, 120.0f),
+        (2200.0f * WorldScale, -1400.0f * WorldScale, 520.0f * WorldScale, 150.0f * HeightScale),
+        (2700.0f * WorldScale,   900.0f * WorldScale, 440.0f * WorldScale, 140.0f * HeightScale),
+        (1500.0f * WorldScale,  2700.0f * WorldScale, 360.0f * WorldScale, 120.0f * HeightScale),
     };
 
     // ── City placement consts ──────────────────────────────────────────────────────────────────────
-    private const float Block = 90.0f;     // placement-grid spacing (m) — INDEPENDENT of the heightmap N
+    private const float Block = 90.0f * BlockScale;     // placement-grid spacing (m) — INDEPENDENT of the heightmap N
     private const float FillChance = 0.72f; // per-cell chance of a building
     private const int RoadEvery = 6;        // every Kth grid line on each axis is a street (skipped)
     private const long PlaceSalt = 1L;      // RNG stream salt for placement (distinct from the terrain noise)
@@ -74,7 +85,7 @@ public static class WorldGenerator
             FractalOctaves = 5,
             FractalLacunarity = 2.0f,
             FractalGain = 0.5f,
-            Frequency = 1.0f / 2200.0f,   // ~2 km features
+            Frequency = 1.0f / (2200.0f * WorldScale),   // ~2 km features x WorldScale wavelength
         };
         var coastNz = new FastNoiseLite
         {
@@ -84,7 +95,7 @@ public static class WorldGenerator
             FractalOctaves = 3,
             FractalLacunarity = 2.0f,
             FractalGain = 0.5f,
-            Frequency = 1.0f / 3000.0f,
+            Frequency = 1.0f / (3000.0f * WorldScale),
         };
 
         var raw = new float[N * N];     // real elevation (metres) before normalising

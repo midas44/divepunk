@@ -1,7 +1,7 @@
 using Godot;
 
 // The entire baked world as DATA (spec §7.1): a terrain heightmap, a coarse biome map, and the object
-// descriptors. Saved to res://world/world_8km.res by the bake; loaded once at runtime by the Task-4 loader.
+// descriptors. Saved to res://world/world_main.res by the bake; loaded once at runtime by the Task-4 loader.
 // FormatVersion guards stale bakes when the schema changes.
 //
 // A Resource serialises only its [Export] members. float[]/byte[] map to PackedFloat32Array/PackedByteArray
@@ -29,7 +29,7 @@ public partial class WorldData : Resource
     // fallback is parallel typed arrays behind the same API — NOT a Task-3 concern.
     [Export] public Godot.Collections.Array<PlacedObject> Objects { get; set; } = new();
 
-    // ── Runtime sampling (Task 5) — additive, NOT serialised (no [Export]); world_8km.res unchanged. ──
+    // ── Runtime sampling (Task 5) — additive, NOT serialised (no [Export]); world_main.res unchanged. ──
     // Real elevation (metres) at world (x,z): bilinear over the normalised heightmap, then Lerp(MinY,MaxY).
     // MUST stay byte-identical to WorldGenerator.SampleHeight so terrain rises to EXACTLY meet the baked
     // building bases (TASK05 §4). The city plateau is flat, so towers there seat perfectly regardless.
